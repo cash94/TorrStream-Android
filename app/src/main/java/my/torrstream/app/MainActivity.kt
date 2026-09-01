@@ -231,6 +231,8 @@ class MainActivity : BaseActivity(),
         var playerAutoNext: Boolean = true
         var keepPlayerConnection: Boolean = true
         var lampaActivity: String = "{}" // JSON
+        /** Web app's clientId, read out of the WebView so progress saving needs no page support. */
+        var webClientId: String? = null
         lateinit var urlAdapter: ArrayAdapter<String>
     }
 
@@ -408,6 +410,7 @@ class MainActivity : BaseActivity(),
                 for (item in itemsToProcess) {
                     runVoidJsFunc(item[0], item[1])
                 }
+                cacheWebClientId()
                 // Background update Android TV channels and recommendations
                 withContext(Dispatchers.Default) {
                     delay(waitDelay)
@@ -1915,6 +1918,26 @@ class MainActivity : BaseActivity(),
         }
     }
 
+    /**
+     * Reads the web app's clientId straight out of the WebView's localStorage.
+     *
+     * Progress is stored per client, and that id lives only in the page. Taking it from here
+     * rather than from the player payload means the built-in player keeps saving progress even
+     * against an older deployment of the web app.
+     */
+    private fun cacheWebClientId() {
+        browser?.evaluateJavascript("localStorage.getItem('clientId')") { raw ->
+            val value = raw?.trim()?.removeSurrounding("\"")
+                ?.takeIf { it.isNotEmpty() && it != "null" && it != "undefined" }
+            if (value != null) {
+                webClientId = value
+                logDebug("clientId picked up from web storage")
+            } else {
+                Log.w(TAG, "No clientId in web storage — progress cannot be stored per client")
+            }
+        }
+    }
+
     private fun getHeadersFromState(state: PlayerStateManager.PlaybackState): Array<String>? {
         return (state.extras["headers_array"] as? List<*>)?.filterIsInstance<String>()
             ?.toTypedArray()
@@ -1985,12 +2008,17 @@ class MainActivity : BaseActivity(),
 
             // Periodic timecode saving: without it progress only reaches the server when the
             // player exits cleanly, so a killed process loses the whole session.
-            jsonObject.optString("timecode_api").takeIf { it.isNotBlank() }?.let {
-                putExtra(InternalPlayerActivity.Extras.TIMECODE_API, it)
-            }
-            jsonObject.optString("client_id").takeIf { it.isNotBlank() && it != "null" }?.let {
-                putExtra(InternalPlayerActivity.Extras.CLIENT_ID, it)
-            }
+            //
+            // Both values are derived here when the page does not supply them, so saving does not
+            // depend on the deployed version of the web app: the endpoint lives on the same host
+            // the page was loaded from, and the clientId is read out of its localStorage.
+            val timecodeApi = jsonObject.optString("timecode_api").takeIf { it.isNotBlank() }
+                ?: LAMPA_URL.takeIf { it.isNotBlank() }?.trimEnd('/')?.plus("/api/timecode/save")
+            timecodeApi?.let { putExtra(InternalPlayerActivity.Extras.TIMECODE_API, it) }
+
+            val clientId = jsonObject.optString("client_id")
+                .takeIf { it.isNotBlank() && it != "null" } ?: webClientId
+            clientId?.let { putExtra(InternalPlayerActivity.Extras.CLIENT_ID, it) }
         }
         launchPlayer(intent)
     }
