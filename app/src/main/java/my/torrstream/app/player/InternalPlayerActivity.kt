@@ -761,7 +761,8 @@ class InternalPlayerActivity : AppCompatActivity() {
     private fun currentTimecodeSnapshot(): TimecodeSnapshot? {
         val p = player ?: return null
         val uri = p.currentMediaItem?.localConfiguration?.uri ?: return null
-        val hash = uri.getQueryParameter("link")?.takeIf { it.isNotBlank() } ?: return null
+        val link = uri.getQueryParameter("link")?.takeIf { it.isNotBlank() } ?: return null
+        val hash = infoHashFrom(link) ?: return null
         val fileId = uri.getQueryParameter("index")?.toIntOrNull() ?: return null
 
         val timeSec = (p.currentPosition.coerceAtLeast(0L) / 1000).toInt()
@@ -771,6 +772,21 @@ class InternalPlayerActivity : AppCompatActivity() {
         if (timeSec < TIMECODE_MIN_SEC) return null
         if (durationSec > 0 && timeSec > durationSec - TIMECODE_END_GUARD_SEC) return null
         return TimecodeSnapshot(hash, fileId, timeSec, durationSec)
+    }
+
+    /**
+     * TorrServer's `link` parameter takes either a bare info-hash or a whole magnet URI. Every
+     * stream url the web app builds today carries a bare hash, but the API accepts a magnet, and
+     * both must key the same stored timecode — so normalise to the info-hash either way.
+     *
+     * A bare hash is passed through untouched rather than lower-cased, so it keys byte-identically
+     * to what the web player already stores for the same file.
+     */
+    private fun infoHashFrom(link: String): String? {
+        if (link.matches(Regex("[a-fA-F0-9]{40}"))) return link
+        Regex("xt=urn:btih:([a-fA-F0-9]{40})", RegexOption.IGNORE_CASE).find(link)
+            ?.let { return it.groupValues[1].lowercase() }
+        return Regex("[a-fA-F0-9]{40}").find(link)?.value?.lowercase()
     }
 
     private fun postTimecode(endpoint: String, clientId: String, snapshot: TimecodeSnapshot) {
