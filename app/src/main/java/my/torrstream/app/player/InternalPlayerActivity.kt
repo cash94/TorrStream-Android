@@ -739,15 +739,30 @@ class InternalPlayerActivity : AppCompatActivity() {
      * one in line.
      */
     private fun startTimecodeReporting() {
-        val endpoint = intent.getStringExtra(Extras.TIMECODE_API)?.takeIf { it.isNotBlank() } ?: return
-        val clientId = intent.getStringExtra(Extras.CLIENT_ID)?.takeIf { it.isNotBlank() } ?: return
+        val endpoint = intent.getStringExtra(Extras.TIMECODE_API)?.takeIf { it.isNotBlank() }
+        val clientId = intent.getStringExtra(Extras.CLIENT_ID)?.takeIf { it.isNotBlank() }
+        if (endpoint == null || clientId == null) {
+            // Loud on purpose: a silent return here is indistinguishable in the log from a
+            // request that failed, and both look like "progress just isn't saved".
+            Log.w(
+                TAG,
+                "Periodic timecode saving is OFF — the web app sent no " +
+                        (if (endpoint == null) "timecode_api" else "client_id") +
+                        ". Deploy the current player.js."
+            )
+            return
+        }
 
         timecodeJob?.cancel()
         timecodeJob = lifecycleScope.launch {
             while (isActive) {
                 delay(TIMECODE_SAVE_INTERVAL_MS)
                 // Read player state on the main thread, then hand the plain data to IO.
-                val snapshot = currentTimecodeSnapshot() ?: continue
+                val snapshot = currentTimecodeSnapshot()
+                if (snapshot == null) {
+                    Log.d(TAG, "Timecode tick skipped (too early, near the end, or no hash in url)")
+                    continue
+                }
                 withContext(Dispatchers.IO) { postTimecode(endpoint, clientId, snapshot) }
             }
         }
