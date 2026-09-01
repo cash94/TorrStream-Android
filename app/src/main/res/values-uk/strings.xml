@@ -35,6 +35,7 @@
     <string name="player_episode_number">Епізод %1$d</string>
     <string name="player_skip_intro">⏩ Пропустити вступ</string>
     <string name="player_skip_credits">⏩ Пропустити титри</string>
+    <string name="player_seek_step">%1$d сек</string>
     <string name="not_found_speech">Не вдалося запустити голосове введення</string>
     <string name="search_is_empty">Введіть пошукову фразу</string>
     <string name="search_no_voice_recognizer">Немає додатків для розпізнавання голосу</string>

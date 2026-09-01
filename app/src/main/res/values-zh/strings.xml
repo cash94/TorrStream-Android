@@ -35,6 +35,7 @@
     <string name="player_episode_number">第 %1$d 集</string>
     <string name="player_skip_intro">⏩ 跳过片头</string>
     <string name="player_skip_credits">⏩ 跳过片尾</string>
+    <string name="player_seek_step">%1$d 秒</string>
     <string name="not_found_speech">语音输入失败</string>
     <string name="search_is_empty">请输入搜索关键字</string>
     <string name="search_no_voice_recognizer">没有语音识别应用</string>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backdrop for the seek read-out. Dark and plain: it sits over the picture during scrubbing
+     and must stay legible without competing with the video. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#CC0D0D12" />
+    <corners android:radius="12dp" />
+</shape>

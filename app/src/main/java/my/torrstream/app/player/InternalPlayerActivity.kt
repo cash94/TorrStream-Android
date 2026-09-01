@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
@@ -96,6 +97,19 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val SKIP_BUTTON_TIMEOUT_MS = 10_000L
 
         private const val SEEK_STEP_MS = 15_000L
+
+        /**
+         * Hold-to-seek acceleration, mirroring the web player: the longer a direction is held,
+         * the bigger each jump gets. Pairs of (held for at least N ms) to (step in seconds).
+         */
+        private val SEEK_ACCELERATION = arrayOf(
+            0L to 5, 500L to 10, 1000L to 20, 1500L to 30,
+            2000L to 45, 2500L to 60, 3000L to 90, 4000L to 120,
+        )
+
+        /** A pause longer than this ends the hold, so the next press starts from the small step. */
+        private const val SEEK_HOLD_RESET_MS = 260L
+        private const val SEEK_OVERLAY_HIDE_MS = 800L
         private const val PROGRESS_TICK_MS = 500L
         private const val CONTROLS_TIMEOUT_MS = 5_000L
         private const val SEEK_DEBOUNCE_MS = 250L
@@ -131,6 +145,17 @@ class InternalPlayerActivity : AppCompatActivity() {
     private lateinit var btnEpisodes: ImageButton
     private lateinit var btnMute: ImageButton
     private lateinit var btnResize: ImageButton
+
+    private lateinit var seekOverlay: View
+    private lateinit var seekOverlayTime: TextView
+    private lateinit var seekOverlayDirection: TextView
+    private lateinit var seekOverlayStep: TextView
+
+    // Hold tracking for seek acceleration.
+    private var seekHoldStartMs = 0L
+    private var lastSeekEventAt = 0L
+    private var lastSeekProgress = 0
+    private var lastSeekDirection = 1
 
     private lateinit var skipContainer: View
     private lateinit var skipButton: Button
@@ -199,6 +224,11 @@ class InternalPlayerActivity : AppCompatActivity() {
         btnMute = findViewById(R.id.btnMute)
         btnResize = findViewById(R.id.btnResize)
 
+        seekOverlay = findViewById(R.id.seekOverlay)
+        seekOverlayTime = findViewById(R.id.seekOverlayTime)
+        seekOverlayDirection = findViewById(R.id.seekOverlayDirection)
+        seekOverlayStep = findViewById(R.id.seekOverlayStep)
+
         skipContainer = findViewById(R.id.skipContainer)
         skipButton = findViewById(R.id.skipButton)
         skipProgress = findViewById(R.id.skipProgress)
@@ -249,6 +279,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 scrubbing = true
                 pendingSeekMs = target
                 handler.postDelayed(seekCommit, SEEK_DEBOUNCE_MS)
+                onScrubbed(progress, target, duration)
                 showControls()
             }
 
@@ -412,6 +443,11 @@ class InternalPlayerActivity : AppCompatActivity() {
         val wasVisible = controlsPanel.visibility == View.VISIBLE
         controlsPanel.visibility = if (visible) View.VISIBLE else View.GONE
         titleView.visibility = if (visible) View.VISIBLE else View.GONE
+        // The read-out belongs to the seek bar; without the bar there is nothing to read.
+        if (!visible) {
+            handler.removeCallbacks(hideSeekOverlay)
+            seekOverlay.visibility = View.GONE
+        }
         if (skipVisible) skipContainer.post { positionSkipButton() }
         if (visible && !wasVisible) {
             // A live skip offer keeps the remote — it expires, the control bar doesn't.
@@ -673,6 +709,54 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     // endregion
 
+    // region seek read-out
+
+    private val hideSeekOverlay = Runnable { seekOverlay.visibility = View.GONE }
+
+    /**
+     * Runs on every scrub keypress: works out the direction, how long that direction has been
+     * held, grows the jump accordingly and shows where the scrub will land.
+     */
+    private fun onScrubbed(progress: Int, targetMs: Long, durationMs: Long) {
+        val now = SystemClock.uptimeMillis()
+        val direction = when {
+            progress > lastSeekProgress -> 1
+            progress < lastSeekProgress -> -1
+            // Pinned at either end: the bar stops moving but the intent hasn't changed.
+            else -> lastSeekDirection
+        }
+        // Changing your mind, or pausing, starts the acceleration over from the small step.
+        if (direction != lastSeekDirection || now - lastSeekEventAt > SEEK_HOLD_RESET_MS) {
+            seekHoldStartMs = now
+        }
+        lastSeekEventAt = now
+        lastSeekDirection = direction
+        lastSeekProgress = progress
+
+        val stepSec = accelerationStepSec(now - seekHoldStartMs)
+        // Takes effect on the next keypress — which is exactly the jump being advertised.
+        seekBar.keyProgressIncrement =
+            max(1, (stepSec * 1000L * SEEK_BAR_STEPS / durationMs).toInt())
+
+        seekOverlayTime.text = formatTime(targetMs)
+        seekOverlayDirection.text = if (direction > 0) "▶▶" else "◀◀"
+        seekOverlayStep.text = getString(R.string.player_seek_step, stepSec)
+        seekOverlay.visibility = View.VISIBLE
+        handler.removeCallbacks(hideSeekOverlay)
+        handler.postDelayed(hideSeekOverlay, SEEK_OVERLAY_HIDE_MS)
+    }
+
+    private fun accelerationStepSec(heldMs: Long): Int {
+        var step = SEEK_ACCELERATION.first().second
+        for ((threshold, value) in SEEK_ACCELERATION) {
+            if (heldMs < threshold) break
+            step = value
+        }
+        return step
+    }
+
+    // endregion
+
     // region progress
 
     private val progressTick = object : Runnable {
@@ -693,9 +777,14 @@ class InternalPlayerActivity : AppCompatActivity() {
             if (!scrubbing && !seekBar.isPressed) {
                 seekBar.progress = (position * SEEK_BAR_STEPS / duration).toInt()
             }
-            // ~15 s per D-pad press regardless of how long the film is.
-            seekBar.keyProgressIncrement =
-                max(1, (SEEK_STEP_MS * SEEK_BAR_STEPS / duration).toInt())
+            // Base step for a fresh press, sized so it means the same number of seconds on a
+            // short episode and a long film. While a direction is being held, onScrubbed() owns
+            // this value and grows it — hence the guard, or acceleration would be wiped every tick.
+            if (!scrubbing) {
+                val baseStepSec = SEEK_ACCELERATION.first().second
+                seekBar.keyProgressIncrement =
+                    max(1, (baseStepSec * 1000L * SEEK_BAR_STEPS / duration).toInt())
+            }
         }
         lastPosition = position
         if (!scrubbing) positionText.text = formatTime(position)
