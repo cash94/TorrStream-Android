@@ -1982,6 +1982,15 @@ class MainActivity : BaseActivity(),
             jsonObject.optInt("season", 0).takeIf { it > 0 }?.let {
                 putExtra(InternalPlayerActivity.Extras.SEASON, it)
             }
+
+            // Periodic timecode saving: without it progress only reaches the server when the
+            // player exits cleanly, so a killed process loses the whole session.
+            jsonObject.optString("timecode_api").takeIf { it.isNotBlank() }?.let {
+                putExtra(InternalPlayerActivity.Extras.TIMECODE_API, it)
+            }
+            jsonObject.optString("client_id").takeIf { it.isNotBlank() && it != "null" }?.let {
+                putExtra(InternalPlayerActivity.Extras.CLIENT_ID, it)
+            }
         }
         launchPlayer(intent)
     }

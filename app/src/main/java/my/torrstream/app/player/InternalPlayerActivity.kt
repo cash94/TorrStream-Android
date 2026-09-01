@@ -24,6 +24,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -80,6 +82,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         const val SKIP_API = "skip_api"        // base url of the intro/credits timing service
         const val TMDB_ID = "tmdb_id"
         const val SEASON = "season"
+        const val TIMECODE_API = "timecode_api"  // POST endpoint that stores playback progress
+        const val CLIENT_ID = "client_id"
     }
 
     private data class SkipRange(val type: String, val startMs: Long, val endMs: Long) {
@@ -95,6 +99,12 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val TYPE_INTRO = "intro"
         private const val TYPE_CREDITS = "credits"
         private const val SKIP_BUTTON_TIMEOUT_MS = 10_000L
+
+        private const val TIMECODE_SAVE_INTERVAL_MS = 30_000L
+        /** Below this the position isn't worth resuming from — matches the web player. */
+        private const val TIMECODE_MIN_SEC = 5
+        /** This close to the end, resuming would drop the viewer back into the credits. */
+        private const val TIMECODE_END_GUARD_SEC = 10
 
         private const val SEEK_STEP_MS = 15_000L
 
@@ -166,6 +176,8 @@ class InternalPlayerActivity : AppCompatActivity() {
     private val offeredSkipKeys = mutableSetOf<String>()
     private var skipFetchJob: Job? = null
     private var skipFetchedForIndex = -1
+
+    private var timecodeJob: Job? = null
 
     private lateinit var sidePanel: View
     private lateinit var sidePanelTitle: TextView
@@ -709,6 +721,94 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     // endregion
 
+    // region timecode reporting
+
+    private data class TimecodeSnapshot(
+        val hash: String,
+        val fileId: Int,
+        val timeSec: Int,
+        val durationSec: Int,
+    )
+
+    /**
+     * Posts playback progress every 30 s.
+     *
+     * The exit path already reports through MainActivity's result contract, but that only fires
+     * on a clean exit: a killed process, a crash or a lost battery took the whole session's
+     * progress with it. The web player has always saved periodically; this brings the built-in
+     * one in line.
+     */
+    private fun startTimecodeReporting() {
+        val endpoint = intent.getStringExtra(Extras.TIMECODE_API)?.takeIf { it.isNotBlank() } ?: return
+        val clientId = intent.getStringExtra(Extras.CLIENT_ID)?.takeIf { it.isNotBlank() } ?: return
+
+        timecodeJob?.cancel()
+        timecodeJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(TIMECODE_SAVE_INTERVAL_MS)
+                // Read player state on the main thread, then hand the plain data to IO.
+                val snapshot = currentTimecodeSnapshot() ?: continue
+                withContext(Dispatchers.IO) { postTimecode(endpoint, clientId, snapshot) }
+            }
+        }
+    }
+
+    /**
+     * Null whenever the current position isn't worth storing: too early to be a resume point, or
+     * so close to the end that resuming would drop the viewer straight back into the credits.
+     * Same two guards the web player applies.
+     */
+    private fun currentTimecodeSnapshot(): TimecodeSnapshot? {
+        val p = player ?: return null
+        val uri = p.currentMediaItem?.localConfiguration?.uri ?: return null
+        val hash = uri.getQueryParameter("link")?.takeIf { it.isNotBlank() } ?: return null
+        val fileId = uri.getQueryParameter("index")?.toIntOrNull() ?: return null
+
+        val timeSec = (p.currentPosition.coerceAtLeast(0L) / 1000).toInt()
+        val durationSec =
+            if (p.duration > 0 && p.duration != C.TIME_UNSET) (p.duration / 1000).toInt() else 0
+
+        if (timeSec < TIMECODE_MIN_SEC) return null
+        if (durationSec > 0 && timeSec > durationSec - TIMECODE_END_GUARD_SEC) return null
+        return TimecodeSnapshot(hash, fileId, timeSec, durationSec)
+    }
+
+    private fun postTimecode(endpoint: String, clientId: String, snapshot: TimecodeSnapshot) {
+        var connection: HttpURLConnection? = null
+        try {
+            val body = JSONObject().apply {
+                put("clientId", clientId)
+                put("hash", snapshot.hash)
+                put("fileId", snapshot.fileId)
+                put("timecode", snapshot.timeSec)
+                put("duration", snapshot.durationSec)
+            }.toString()
+
+            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 8_000
+                readTimeout = 8_000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+            }
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+
+            val code = connection.responseCode
+            if (code in 200..299) {
+                Log.d(TAG, "Timecode saved: ${snapshot.timeSec}s of ${snapshot.durationSec}s")
+            } else {
+                Log.w(TAG, "Timecode save returned HTTP $code")
+            }
+        } catch (e: Exception) {
+            // Losing a periodic save is not worth disturbing playback over.
+            Log.w(TAG, "Timecode save failed: ${e.message}")
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    // endregion
+
     // region seek read-out
 
     private val hideSeekOverlay = Runnable { seekOverlay.visibility = View.GONE }
@@ -966,6 +1066,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         updateEpisodeButtons()
         updatePlayPauseIcon()
         handler.post(progressTick)
+        startTimecodeReporting()
         showControls()
     }
 
@@ -1154,6 +1255,8 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private fun releasePlayer() {
         snapshotPosition()
+        timecodeJob?.cancel()
+        timecodeJob = null
         player?.let {
             it.removeListener(playerListener)
             it.release()
