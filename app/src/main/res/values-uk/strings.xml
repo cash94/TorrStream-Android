@@ -1,12 +1,10 @@
 <resources>
-    <string name="no_activity_found">Немає додатка для відкриття цього типу посилань.</string>
     <string name="no_player_activity_found">Не знайдено відповідного мультимедійного програвача. Встановіть плеєр з Google Play або будь-якого іншого джерела. Ми рекомендуємо Just Player, Vimu Media Player, VLC.</string>
     <string name="keep_connection_channel">Фонове зʼєднання</string>
     <string name="keep_connection_notification">Зʼєднання підтримується під час перегляду</string>
     <string name="keep_connection_enable">Увімкнути утримання сокета</string>
     <string name="keep_connection_disable">Вимкнути утримання сокета</string>
     <string name="no_torrent_activity_found">Немає додатка для відкриття торрент-посилань. Встановіть TorrServe або будь-який інший додаток, що працює з торрентами.</string>
-    <string name="no_youtube_activity_found">Немає додатка для відкриття посилань YouTube. Встановіть додаток YouTube.</string>
     <string name="no_launch_player">Обраний плеєр не підтримує відтворення цього відео</string>
     <string name="invalid_url">Введіть правильну адресу сайту, наприклад:\nhttp://torrstream.hnar.online</string>
     <string name="cancel">Скасувати</string>
@@ -37,9 +35,7 @@
     <string name="player_episode_number">Епізод %1$d</string>
     <string name="player_skip_intro">⏩ Пропустити вступ</string>
     <string name="player_skip_credits">⏩ Пропустити титри</string>
-    <string name="select_player_reset">Вибраний плеєр було скинуто</string>
     <string name="not_found_speech">Не вдалося запустити голосове введення</string>
-    <string name="search_label">Пошук</string>
     <string name="search_is_empty">Введіть пошукову фразу</string>
     <string name="search_no_voice_recognizer">Немає додатків для розпізнавання голосу</string>
     <string name="search_requires_record_audio">Для використання цієї функції додатку потрібен дозвіл на запис аудіо!</string>
@@ -50,47 +46,13 @@
     <string name="update_new_version">Знайдено нову версію</string>
     <string name="update_loading">Завантаження оновлення…</string>
     <string name="use_as_default">Запам\'ятати вибір</string>
-    <string name="startup_not_found_title">Сервіс Crosswalk не знайдено</string>
-    <string name="startup_not_found_message">Для роботи APP_NAME потрібний сервіс Crosswalk. Встановіть спочатку його, а потім перезапустіть APP_NAME.</string>
-    <string name="startup_older_version_title">Потрібен новий Crosswalk</string>
-    <string name="startup_older_version_message">Версію Crosswalk у цій системі потрібно оновити. Встановіть його з магазину додатків, а потім перезапустіть APP_NAME.</string>
-    <string name="startup_newer_version_title">Несумісний Crosswalk</string>
-    <string name="startup_newer_version_message">APP_NAME несумісний зі встановленою версією Crosswalk.</string>
-    <string name="startup_architecture_mismatch_title">Невідповідність архітектури</string>
-    <string name="startup_architecture_mismatch_message">Необхідно оновити Crosswalk для відповідності архітектури пристрою. Встановіть сервіс і перезапустіть додаток APP_NAME.</string>
-    <string name="crosswalk_install_title">Встановлення Crosswalk</string>
     <string name="download_failed_message">Помилка завантаження</string>
-    <string name="download_progress_message">Виконується завантаження Crosswalk…</string>
-    <string name="select_store_message">Встановіть сервіс Crosswalk з STORE_NAME</string>
-    <string name="unsupported_store_message">На пристрої не знайдено сервіс Crosswalk. Для роботи додатку необхідно встановити його вручну, завантаживши з цієї адреси (https://github.com/TorrStream-app/TorrStream/releases/tag/1.1.0).</string>
-    <string name="xwalk_download_crosswalk">Пряме завантаження</string>
-    <string name="xwalk_get_crosswalk">Завантажити Crosswalk</string>
-    <string name="xwalk_cancel">Скасувати</string>
-    <string name="xwalk_continue">Продовжити</string>
-    <string name="xwalk_close">Закрити</string>
-    <string name="xwalk_retry">Повторити</string>
     <!--Search-->
-    <string name="open_TorrStream">відкрити TorrStream</string>
-    <string name="open_settings">відкрити налаштування TorrStream</string>
-    <string name="TorrStream_suxx">TorrStream відстій</string>
-    <string name="series">Серіал</string>
-    <string name="shortyear">р.</string>
     <!--Channels-->
-    <string name="ch_recs">Рекомендації</string>
-    <string name="ch_liked">Подобається</string>
-    <string name="ch_history">Історія</string>
-    <string name="ch_bookmarks">Закладки</string>
-    <string name="ch_look">Дивлюся</string>
-    <string name="ch_viewed">Переглянуто</string>
-    <string name="ch_scheduled">Заплановано</string>
-    <string name="ch_continued">Далі буде</string>
-    <string name="ch_thrown">Скасований</string>
-    <string name="title_main">Головна</string>
     <!--Settings-->
     <string name="update_chan_title">Оновити канали Android TV</string>
     <string name="update_home_title">Оновити рекомендації</string>
     <string name="backup_restore_title">Резервування та відновлення</string>
-    <string name="backup_all">Резервна копія</string>
     <string name="backup_all_title">Зробити резервну копію всіх налаштувань</string>
     <string name="restore_app_title">Відновити налаштування додатка</string>
     <string name="restore_storage_title">Відновити налаштування TorrStream</string>
@@ -116,7 +78,6 @@
     <!-- Net Errors -->
     <string name="net_error_failed">Помилка мережевого запиту</string>
     <string name="net_error_timed_out">Таймаут з\'єднання</string>
-    <string name="net_error_connection_timed_out">Таймаут з\'єднання</string>
     <string name="net_error_connection_closed">З\'єднання закрито</string>
     <string name="net_error_connection_reset">З\'єднання скинуто</string>
     <string name="net_error_connection_refused">З\'єднання відхилено</string>

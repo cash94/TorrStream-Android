@@ -1,14 +1,12 @@
 <resources>
     <string name="app_name" translatable="false">TorrStream</string>
     <string name="provider_auth" translatable="false">my.torrstream.app</string>
-    <string name="no_activity_found">There is no application to open this type of link.</string>
     <string name="no_player_activity_found">No matching multimedia player found. Please, install player from Google Play Store or any other source. We recommend Just Player, Vimu Media Player, VLC.</string>
     <string name="keep_connection_channel">Background connection</string>
     <string name="keep_connection_notification">Keeping connection alive during playback</string>
     <string name="keep_connection_enable">Enable keeping the socket open</string>
     <string name="keep_connection_disable">Disable keeping the socket open</string>
     <string name="no_torrent_activity_found">There is no application to open torrent links. Please, install TorrServe or any other App working with torrents.</string>
-    <string name="no_youtube_activity_found">There is no application to open YouTube links. Please, install YouTube App.</string>
     <string name="no_launch_player">The selected player does not support playing this video</string>
     <string name="invalid_url">Enter the correct website address, for example:\nhttp://torrstream.hnar.online</string>
     <string name="cancel">Cancel</string>
@@ -39,9 +37,7 @@
     <string name="player_episode_number">Episode %1$d</string>
     <string name="player_skip_intro">⏩ Skip intro</string>
     <string name="player_skip_credits">⏩ Skip credits</string>
-    <string name="select_player_reset">The selected player has been reset</string>
     <string name="not_found_speech">Failed to start voice input</string>
-    <string name="search_label">Search</string>
     <string name="search_is_empty">Enter your search phrase</string>
     <string name="search_no_voice_recognizer">No voice recognition apps</string>
     <string name="search_requires_record_audio">The app requires permission to record audio to use this feature!</string>
@@ -52,48 +48,13 @@
     <string name="update_new_version">New version found</string>
     <string name="update_loading">Downloading the update…</string>
     <string name="use_as_default">Remember choice</string>
-    <string name="startup_not_found_title">Crosswalk Project Service Not Found</string>
-    <string name="startup_not_found_message">APP_NAME requires the Crosswalk Project Service to work. Please install it first, then restart APP_NAME.</string>
-    <string name="startup_older_version_title">New Crosswalk Project Service Required</string>
-    <string name="startup_older_version_message">The version of the Crosswalk Project Service on this system must be updated. Please install it from the app store, then restart APP_NAME.</string>
-    <string name="startup_newer_version_title">Incompatible Crosswalk Project Service</string>
-    <string name="startup_newer_version_message">APP_NAME is not compatible with the installed version of the Crosswalk Project Service.</string>
-    <string name="startup_architecture_mismatch_title">Mismatch of CPU Architecture</string>
-    <string name="startup_architecture_mismatch_message">The Crosswalk Project Service must be updated to match the CPU architecture of the device. Please install it, then restart APP_NAME.</string>
-    <string name="crosswalk_install_title">Crosswalk Project Install</string>
     <string name="download_failed_message">Download failed</string>
-    <string name="download_progress_message">Downloading the Crosswalk Project Service from remote host…</string>
-    <string name="select_store_message">Please install the Crosswalk Project Service from STORE_NAME</string>
-    <string name="unsupported_store_message">The application stores on your device don\'t support Crosswalk Project Service. Please download Crosswalk Project Service manually from this website (https://github.com/TorrStream-app/TorrStream/releases/tag/1.1.0).</string>
-    <string name="xwalk_download_crosswalk">Direct Download</string>
-    <string name="xwalk_get_crosswalk">Get Crosswalk</string>
-    <string name="xwalk_cancel">Cancel</string>
-    <string name="xwalk_continue">Continue</string>
-    <string name="xwalk_close">Close</string>
-    <string name="xwalk_retry">Retry</string>
-    <string name="xwalk_market_crosswalk" translatable="false">Google Play</string>
     <!--Search-->
-    <string name="open_TorrStream">open TorrStream</string>
-    <string name="open_settings">open TorrStream settings</string>
-    <string name="TorrStream_suxx">TorrStream suxx</string>
-    <string name="series">TV Series</string>
-    <string name="shortyear" />
     <!--Channels-->
-    <string name="ch_recs">Recommended</string>
-    <string name="ch_liked">Liked</string>
-    <string name="ch_history">History</string>
-    <string name="ch_bookmarks">Bookmarks</string>
-    <string name="ch_look">Looking</string>
-    <string name="ch_viewed">Viewed</string>
-    <string name="ch_scheduled">Scheduled</string>
-    <string name="ch_continued">Continued</string>
-    <string name="ch_thrown">Thrown</string>
-    <string name="title_main">Home</string>
     <!--Settings-->
     <string name="update_chan_title">Update TV Home Channels</string>
     <string name="update_home_title">Update TV Recommendations</string>
     <string name="backup_restore_title">Settings Backup &amp; Restore</string>
-    <string name="backup_all">Backup All Settings</string>
     <string name="backup_all_title">TorrStream &amp; App Settings Backup</string>
     <string name="restore_app_title">Restore App Preferences</string>
     <string name="restore_storage_title">Restore TorrStream Settings</string>
@@ -119,7 +80,6 @@
     <!-- Net Errors -->
     <string name="net_error_failed">Network request failed</string>
     <string name="net_error_timed_out">Connection timed out</string>
-    <string name="net_error_connection_timed_out">Connection timed out</string>
     <string name="net_error_connection_closed">Connection closed</string>
     <string name="net_error_connection_reset">Connection reset</string>
     <string name="net_error_connection_refused">Connection refused</string>
