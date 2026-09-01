@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="lampa_background">#1e1f21</color>
+    <color name="lampa_label_bgcolor">#ee1e1f21</color>
+    <color name="purple_500">#6200ee</color>
+    <color name="purple_700">#3700b3</color>
+    <color name="teal_200">#03dac5</color>
+    <color name="teal_500">#009688</color>
+    <color name="black">#000</color>
+    <color name="black_80">#cc000000</color>
+    <color name="tv_white">#eee</color>
+    <color name="white_10">#1affffff</color>
+    <color name="white_35">#5affffff</color>
+    <color name="red">#ff5251</color>
+</resources>

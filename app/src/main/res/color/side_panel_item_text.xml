@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Focus wins over "current": under the blue focus fill the text must stay white, while the
+     currently playing episode/track is tinted accent so it is identifiable at a glance. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:color="@android:color/white"
+        android:state_focused="true" />
+    <item
+        android:color="#4A9EFF"
+        android:state_checked="true" />
+    <item android:color="#E6FFFFFF" />
+</selector>

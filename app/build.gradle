@@ -1,0 +1,201 @@
+plugins {
+    id 'com.android.application'
+    id 'com.google.devtools.ksp'
+    id 'kotlin-android'
+}
+
+def getVersionCode = { ->
+    try {
+        def code = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'rev-list', '--count', 'origin/main'
+            standardOutput = code
+        }
+        return Integer.parseInt(code.toString().trim())
+    }
+    catch (ignored) {
+        return 1
+    }
+}
+
+def getVersionName = { ->
+    try {
+        def stdout = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'describe', '--tags', '--dirty'
+            standardOutput = stdout
+        }
+        return stdout.toString().trim().replaceFirst("^v", "")
+    }
+    catch (ignored) {
+        return '9.9.9'
+    }
+}
+
+android {
+    //noinspection GradleDependency
+    compileSdk 34
+    defaultConfig {
+        applicationId "my.torrstream.app"
+        // API 23 is the floor for the built-in Media3 player (hardware decoding,
+        // AC3/DTS passthrough, HDR). Raised from 16 together with the Crosswalk removal.
+        minSdkVersion 23
+        //noinspection ExpiredTargetSdkVersion
+        targetSdkVersion 28
+        versionCode getVersionCode()
+        versionName getVersionName()
+        multiDexEnabled = true // required when setting minSdkVersion to 20 or lower
+        // Use SupportLibrary for vectors
+        vectorDrawables.useSupportLibrary = true
+    }
+
+    signingConfigs {
+        release {
+            def keystoreProperties = new Properties()
+            def keystorePropsFile = file("keystore/keystore_config")
+
+            if (keystorePropsFile.exists()) {
+                file("keystore/keystore_config").withInputStream { keystoreProperties.load(it) }
+                storeFile file("$keystoreProperties.storeFile")
+                storePassword "$keystoreProperties.storePassword"
+                keyAlias "$keystoreProperties.keyAlias"
+                keyPassword "$keystoreProperties.keyPassword"
+            } else {
+                //storeFile file(System.getenv('KEYSTORE_FILE'))
+                storePassword System.getenv('KEYSTORE_PASSWORD')
+                keyAlias System.getenv('RELEASE_SIGN_KEY_ALIAS')
+                keyPassword System.getenv('RELEASE_SIGN_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        // Flag to enable support for the new language APIs
+        // https://developer.android.com/studio/write/java8-support-table
+        coreLibraryDesugaringEnabled true
+        // Sets Java compatibility to Java 8
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    packagingOptions {
+        resources.excludes += "DebugProbesKt.bin"
+    }
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+
+    // gradle 4.6 migration: disable dimensions mechanism
+    // more: https://proandroiddev.com/advanced-android-flavors-part-4-a-new-version-fc2ad80c01bb
+    flavorDimensions "default"
+
+    productFlavors {
+        lite {
+            buildConfigField "boolean", "enableUpdate", "true"
+            buildConfigField "String", "defaultAppUrl", "\"\""
+        }
+        full {
+            buildConfigField "boolean", "enableUpdate", "false"
+            buildConfigField "String", "defaultAppUrl", "\"\""
+        }
+        ruStore {
+            versionNameSuffix "-RuStore"
+            minSdk 24 // minSdk RuStore.apk
+            buildConfigField "boolean", "enableUpdate", "false"
+            buildConfigField "String", "defaultAppUrl", "\"http://torrstream.hnar.online\""
+        }
+    }
+
+    packagingOptions {
+        resources.excludes += "DebugProbesKt.bin"
+    }
+    buildFeatures {
+        viewBinding true
+    }
+    namespace 'my.torrstream.app'
+}
+
+dependencies {
+    // https://developer.android.com/studio/write/java8-support#library-desugaring
+    //noinspection GradleDependency 2.0.4 for AGP 7.4
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+
+    def actKtxVer = '1.8.0' // 1.8.0 - last api16 compatible
+    //noinspection GradleDependency
+    implementation "androidx.activity:activity-ktx:$activityKtxVersion"
+    def appCompatVer = '1.6.1' // 1.6.1 - last api16 compatible
+    //noinspection GradleDependency
+    implementation "androidx.appcompat:appcompat:$appCompatVer"
+    def constraintVersion = '2.1.4' // 2.1.4 - last api16 compatible
+    //noinspection GradleDependency
+    implementation "androidx.constraintlayout:constraintlayout:${constraintVersion}"
+    def coreKtxVer = '1.12.0' // 1.12.0 - last api16 compatible
+    //noinspection GradleDependency
+    implementation "androidx.core:core-ktx:$coreKtxVer"
+    def lifecycleVersion = '2.6.2' // 2.6.2 - last api16 compatible
+    //noinspection GradleDependency
+    implementation "androidx.lifecycle:lifecycle-process:$lifecycleVersion"
+    //noinspection GradleDependency
+    implementation "androidx.lifecycle:lifecycle-runtime-ktx:$lifecycleVersion"
+    implementation 'androidx.multidex:multidex:2.0.1'
+    implementation 'androidx.preference:preference-ktx:1.2.1'
+    implementation 'androidx.recommendation:recommendation:1.0.0'
+    //noinspection GradleDependency
+    implementation 'androidx.tvprovider:tvprovider:1.0.0'
+    def vectordrawableVersion = '1.1.0' // 1.1.0 - last api16 compatible
+    //noinspection GradleDependency
+    implementation "androidx.vectordrawable:vectordrawable:${vectordrawableVersion}"
+    def webkitVersion = '1.8.0' // 1.8.0 - last api16 compatible
+    //noinspection GradleDependency
+    implementation "androidx.webkit:webkit:$webkitVersion"
+    // Built-in player. 1.3.1 is the last Media3 line that builds under AGP 7.4 / compileSdk 34.
+    // Only exoplayer+ui+hls are pulled in: the default HTTP data source is used, so the app's
+    // pinned OkHttp 3.12.13 stays untouched (media3-datasource-okhttp would force OkHttp 4.x).
+    def media3Version = '1.3.1'
+    implementation "androidx.media3:media3-exoplayer:$media3Version"
+    implementation "androidx.media3:media3-exoplayer-hls:$media3Version"
+    implementation "androidx.media3:media3-ui:$media3Version"
+    // Software audio decoding (AC3/E-AC3/DTS/TrueHD) for devices whose hardware can't do it.
+    // Prebuilt FFmpeg extension by the Jellyfin project; version tracks media3Version.
+    // NOTE: GPL-3.0 — this is what makes the whole app GPL-3.0.
+    implementation "org.jellyfin.media3:media3-ffmpeg-decoder:1.3.1+2"
+    def glideVersion = '5.0.5' // glide stable
+    implementation "com.github.bumptech.glide:glide:${glideVersion}"
+    implementation("com.github.bumptech.glide:okhttp3-integration:${glideVersion}") {
+        exclude group: 'glide-parent'
+        transitive = false
+    }
+    ksp "com.github.bumptech.glide:ksp:${glideVersion}"
+    implementation "com.github.bumptech.glide:annotations:${glideVersion}"
+    def muiVersion = '1.11.0' // 1.11.0 - last api16 compatible
+    //noinspection GradleDependency
+    implementation "com.google.android.material:material:${muiVersion}"
+    def okhttpVersion = '3.12.13' // okhttp 3.12.13 - latest version for API < 21
+    //noinspection GradleDependency
+    implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
+    //noinspection GradleDependency
+    implementation "com.squareup.okhttp3:okhttp-dnsoverhttps:$okhttpVersion"
+    implementation 'org.brotli:dec:0.1.2'
+    //noinspection GradleDependency
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kp_version" // or jdk7
+    def coroutinesVersion = '1.7.3' // 1.7.3 - last compatible with kp 1.8.22
+    //noinspection GradleDependency
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:$coroutinesVersion"
+    //noinspection GradleDependency 2.10.x thorow java.lang.VerifyError on api17
+    implementation 'com.google.code.gson:gson:2.9.1'
+    def lottieVersion = '6.4.1' // lottie loaders
+    //noinspection GradleDependency 6.6.2+ throw NullPointerException on build
+    implementation "com.airbnb.android:lottie:$lottieVersion"
+    implementation 'info.guardianproject.netcipher:netcipher:2.1.0' // SSL / TLS
+    implementation 'junit:junit:4.13.2'
+    implementation 'org.conscrypt:conscrypt-android:2.5.3' // for TLS v1.3 on API < 29
+    //noinspection GradleDependency 1.8.1 fails on build with old gradle
+    implementation 'org.mozilla:rhino:1.7.15' // JavaScript to run PAC file to get correct proxies
+}

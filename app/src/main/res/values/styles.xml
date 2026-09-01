@@ -1,0 +1,72 @@
+<resources>
+    <!--Theme.AppCompat.Dialog-->
+    <style name="AlertDialog" parent="@style/ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@drawable/dialog_background</item>
+        <!-- Used for the title with Theme.AppCompat.Dialog.Alert -->
+        <item name="android:windowTitleStyle">@style/AlertTitleStyle</item>
+        <!-- Used for the title -->
+        <item name="materialAlertDialogTitleTextStyle">@style/AlertTitleTextStyle</item>
+        <!-- Used for the text -->
+        <item name="android:textColorPrimary">@color/tv_white</item>
+        <!-- Set min width -->
+        <item name="windowMinWidthMajor">50%</item><!--landscape -->
+        <item name="windowMinWidthMinor">70%</item><!--portrait -->
+        <!-- Used for the buttons -->
+        <item name="colorPrimary">@color/teal_200</item>
+        <item name="colorAccent">@color/teal_500</item>
+        <!-- Dialog Buttons -->
+        <item name="buttonBarPositiveButtonStyle">@style/AlertButtonStyle</item>
+        <item name="buttonBarNegativeButtonStyle">@style/AlertButtonStyle</item>
+        <item name="buttonBarNeutralButtonStyle">@style/AlertButtonStyle</item>
+    </style>
+    <!-- Dialog Title -->
+    <style name="AlertTitleStyle">
+        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:layout_marginBottom">12dp</item>
+        <item name="android:textAppearance">@style/TextAppearance.AppCompat.Title</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+    </style>
+    <!-- Material Dialog Title -->
+    <style name="AlertTitleTextStyle" parent="@style/MaterialAlertDialog.MaterialComponents.Title.Text">
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <item name="android:textAppearance">@style/TextAppearance.MaterialComponents.Headline6</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+        <item name="android:textSize">20sp</item>
+    </style>
+    <!-- Dialog Buttons -->
+    <style name="AlertButtonStyle" parent="@style/Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="android:layout_marginLeft">6dp</item>
+        <item name="android:layout_marginRight">6dp</item>
+        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:layout_marginBottom">0dp</item>
+    </style>
+    <!-- TextInputLayout -->
+    <style name="Widget.App.TextInputLayout" parent="Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense">
+        <item name="hintTextColor">?attr/colorAccent</item>
+    </style>
+    <!-- Transparent Dialog -->
+    <style name="TransparentDialog" parent="Theme.Design.Light.BottomSheetDialog">
+        <item name="android:windowCloseOnTouchOutside">false</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:colorBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.5</item>
+        <item name="android:windowFrame">@null</item>
+    </style>
+    <!-- Icon-only buttons on the built-in player's control bar. Sized so all ten fit in one row
+         even on a narrow screen, with a focus highlight that reads clearly from a couch. -->
+    <style name="PlayerControlButton">
+        <item name="android:layout_width">48dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:layout_marginStart">2dp</item>
+        <item name="android:layout_marginEnd">2dp</item>
+        <item name="android:padding">10dp</item>
+        <item name="android:background">@drawable/player_button_bg</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+    </style>
+</resources>

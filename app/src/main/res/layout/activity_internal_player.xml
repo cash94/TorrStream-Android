@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- clickable, so a tap anywhere the controls don't cover reaches the activity and toggles the
+     HUD (PlayerView itself does not consume touches with use_controller off). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/playerRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    android:clickable="true"
+    android:focusable="false"
+    android:keepScreenOn="true">
+
+    <!-- use_controller is off: the panel below is our own, so D-pad focus order can be
+         controlled exactly (buttons -> seek bar -> hidden). -->
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/playerView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:focusable="false"
+        app:resize_mode="fit"
+        app:use_controller="false" />
+
+    <ProgressBar
+        android:id="@+id/playerProgress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:indeterminate="true"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/playerTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="#99000000"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:padding="16dp"
+        android:textColor="@android:color/white"
+        android:textSize="18sp" />
+
+    <LinearLayout
+        android:id="@+id/controlsPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@drawable/player_panel_bg"
+        android:orientation="vertical"
+        android:paddingStart="24dp"
+        android:paddingTop="40dp"
+        android:paddingEnd="24dp"
+        android:paddingBottom="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/positionText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="64dp"
+                android:text="00:00"
+                android:textColor="@android:color/white"
+                android:textSize="14sp" />
+
+            <SeekBar
+                android:id="@+id/seekBar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_marginEnd="12dp"
+                android:layout_weight="1"
+                android:focusable="true"
+                android:focusableInTouchMode="false"
+                android:max="1000"
+                android:nextFocusDown="@+id/btnPlayPause" />
+
+            <TextView
+                android:id="@+id/durationText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="end"
+                android:minWidth="64dp"
+                android:text="00:00"
+                android:textColor="@android:color/white"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/buttonsRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/btnPrevEpisode"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_prev_episode"
+                android:nextFocusLeft="@+id/btnPrevEpisode"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/exo_icon_previous" />
+
+            <ImageButton
+                android:id="@+id/btnRewind"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_rewind"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/exo_icon_rewind" />
+
+            <ImageButton
+                android:id="@+id/btnPlayPause"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_play_pause"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/exo_icon_pause" />
+
+            <ImageButton
+                android:id="@+id/btnForward"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_forward"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/exo_icon_fastforward" />
+
+            <ImageButton
+                android:id="@+id/btnNextEpisode"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_next_episode"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/exo_icon_next" />
+
+            <ImageButton
+                android:id="@+id/btnAudio"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_audio_tracks"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/ic_player_audio" />
+
+            <ImageButton
+                android:id="@+id/btnSubtitles"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_subtitles"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/ic_player_subtitles" />
+
+            <ImageButton
+                android:id="@+id/btnEpisodes"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_episodes"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/ic_player_episodes" />
+
+            <ImageButton
+                android:id="@+id/btnMute"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_mute"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/ic_player_volume" />
+
+            <ImageButton
+                android:id="@+id/btnResize"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_resize"
+                android:nextFocusRight="@+id/btnResize"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/ic_player_resize" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Skip intro / credits, bottom-right. The hairline underneath drains over the ten seconds
+         the offer stays up, so the deadline is visible without anything blinking or pulsing.
+         Code lifts the whole block above the control bar whenever that is on screen. -->
+    <LinearLayout
+        android:id="@+id/skipContainer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="40dp"
+        android:layout_marginBottom="40dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <Button
+            android:id="@+id/skipButton"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/skip_button_bg"
+            android:focusable="true"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="18dp"
+            android:paddingTop="9dp"
+            android:paddingEnd="18dp"
+            android:paddingBottom="9dp"
+            android:textAllCaps="false"
+            android:textColor="@android:color/white"
+            android:textSize="14sp" />
+
+        <View
+            android:id="@+id/skipProgress"
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:layout_marginStart="2dp"
+            android:layout_marginTop="3dp"
+            android:layout_marginEnd="2dp"
+            android:background="#B34A9EFF" />
+    </LinearLayout>
+
+    <!-- Slide-out list for episodes / audio tracks / subtitles. Declared last so it sits above
+         the control bar, and starts off-screen (translationX is applied in code once measured). -->
+    <LinearLayout
+        android:id="@+id/sidePanel"
+        android:layout_width="380dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="#B30D0D12"
+        android:orientation="vertical"
+        android:visibility="invisible">
+
+        <TextView
+            android:id="@+id/sidePanelTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="20dp"
+            android:paddingTop="24dp"
+            android:paddingEnd="20dp"
+            android:paddingBottom="12dp"
+            android:textColor="#4A9EFF"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <ListView
+            android:id="@+id/sidePanelList"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:choiceMode="singleChoice"
+            android:divider="@null"
+            android:dividerHeight="0dp"
+            android:paddingBottom="24dp"
+            android:scrollbars="none" />
+    </LinearLayout>
+
+</FrameLayout>
