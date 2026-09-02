@@ -36,6 +36,13 @@
     <string name="player_skip_intro">⏩ Пропустить вступление</string>
     <string name="player_skip_credits">⏩ Пропустить титры</string>
     <string name="player_seek_step">%1$d сек</string>
+    <string name="player_settings">Настройки</string>
+    <string name="player_clock">Часы</string>
+    <string name="player_buffer">Буфер</string>
+    <string name="player_on">Вкл</string>
+    <string name="player_off">Выкл</string>
+    <string name="player_buffer_mb">%1$d МБ</string>
+    <string name="player_time_left">Осталось %1$s · до %2$s</string>
     <string name="not_found_speech">Не удалось запустить голосовой ввод</string>
     <string name="search_is_empty">Введите поисковую фразу</string>
     <string name="search_no_voice_recognizer">Нет приложений для распознавания голоса</string>

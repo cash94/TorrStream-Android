@@ -38,6 +38,13 @@
     <string name="player_skip_intro">⏩ Skip intro</string>
     <string name="player_skip_credits">⏩ Skip credits</string>
     <string name="player_seek_step">%1$d s</string>
+    <string name="player_settings">Settings</string>
+    <string name="player_clock">Clock</string>
+    <string name="player_buffer">Buffer</string>
+    <string name="player_on">On</string>
+    <string name="player_off">Off</string>
+    <string name="player_buffer_mb">%1$d MB</string>
+    <string name="player_time_left">%1$s left · ends at %2$s</string>
     <string name="not_found_speech">Failed to start voice input</string>
     <string name="search_is_empty">Enter your search phrase</string>
     <string name="search_no_voice_recognizer">No voice recognition apps</string>

@@ -36,6 +36,13 @@
     <string name="player_skip_intro">⏩ 跳过片头</string>
     <string name="player_skip_credits">⏩ 跳过片尾</string>
     <string name="player_seek_step">%1$d 秒</string>
+    <string name="player_settings">设置</string>
+    <string name="player_clock">时钟</string>
+    <string name="player_buffer">缓冲</string>
+    <string name="player_on">开</string>
+    <string name="player_off">关</string>
+    <string name="player_buffer_mb">%1$d MB</string>
+    <string name="player_time_left">剩余 %1$s · 结束于 %2$s</string>
     <string name="not_found_speech">语音输入失败</string>
     <string name="search_is_empty">请输入搜索关键字</string>
     <string name="search_no_voice_recognizer">没有语音识别应用</string>

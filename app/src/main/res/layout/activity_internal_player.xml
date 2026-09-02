@@ -30,6 +30,25 @@
         android:indeterminate="true"
         android:visibility="gone" />
 
+    <!-- Часы поверх картинки. Живут отдельно от панели управления: они должны быть видны и
+         когда HUD скрыт, поэтому приглушены прозрачностью, чтобы не тянуть на себя взгляд. -->
+    <TextView
+        android:id="@+id/playerClock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="20dp"
+        android:alpha="0.55"
+        android:shadowColor="#000000"
+        android:shadowDx="0"
+        android:shadowDy="0"
+        android:shadowRadius="6"
+        android:textColor="@android:color/white"
+        android:textSize="18sp"
+        tools:ignore="HardcodedText"
+        tools:text="23:47" />
+
     <TextView
         android:id="@+id/playerTitle"
         android:layout_width="match_parent"
@@ -91,6 +110,18 @@
                 android:textColor="@android:color/white"
                 android:textSize="14sp" />
         </LinearLayout>
+
+        <!-- Сколько осталось и во сколько закончится -->
+        <TextView
+            android:id="@+id/remainingText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:gravity="end"
+            android:textColor="#B3FFFFFF"
+            android:textSize="13sp"
+            tools:ignore="HardcodedText"
+            tools:text="Осталось 1:23:45 · до 23:47" />
 
         <LinearLayout
             android:id="@+id/buttonsRow"
@@ -168,9 +199,16 @@
                 android:id="@+id/btnResize"
                 style="@style/PlayerControlButton"
                 android:contentDescription="@string/player_resize"
-                android:nextFocusRight="@+id/btnResize"
                 android:nextFocusUp="@+id/seekBar"
                 android:src="@drawable/ic_player_resize" />
+
+            <ImageButton
+                android:id="@+id/btnSettings"
+                style="@style/PlayerControlButton"
+                android:contentDescription="@string/player_settings"
+                android:nextFocusRight="@+id/btnSettings"
+                android:nextFocusUp="@+id/seekBar"
+                android:src="@drawable/ic_player_settings" />
         </LinearLayout>
     </LinearLayout>
 

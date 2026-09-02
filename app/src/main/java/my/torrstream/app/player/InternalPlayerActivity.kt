@@ -43,6 +43,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -51,8 +52,12 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import my.torrstream.app.App
 import my.torrstream.app.R
+import my.torrstream.app.helpers.Prefs
+import my.torrstream.app.helpers.Prefs.playerBufferMb
+import my.torrstream.app.helpers.Prefs.playerShowClock
 // Non-transitive R classes are on, so media3's own drawables are not merged into our R.
 import androidx.media3.ui.R as Media3R
+import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
@@ -155,6 +160,13 @@ class InternalPlayerActivity : AppCompatActivity() {
     private lateinit var btnEpisodes: ImageButton
     private lateinit var btnMute: ImageButton
     private lateinit var btnResize: ImageButton
+    private lateinit var btnSettings: ImageButton
+    private lateinit var clockView: TextView
+    private lateinit var remainingText: TextView
+
+    /** Set when the player is rebuilt (buffer change) so playback resumes where it left off. */
+    private var resumeIndex: Int? = null
+    private var resumePositionMs: Long? = null
 
     private lateinit var seekOverlay: View
     private lateinit var seekOverlayTime: TextView
@@ -235,6 +247,9 @@ class InternalPlayerActivity : AppCompatActivity() {
         btnEpisodes = findViewById(R.id.btnEpisodes)
         btnMute = findViewById(R.id.btnMute)
         btnResize = findViewById(R.id.btnResize)
+        btnSettings = findViewById(R.id.btnSettings)
+        clockView = findViewById(R.id.playerClock)
+        remainingText = findViewById(R.id.remainingText)
 
         seekOverlay = findViewById(R.id.seekOverlay)
         seekOverlayTime = findViewById(R.id.seekOverlayTime)
@@ -267,6 +282,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         btnEpisodes.setOnClickListener { showEpisodesDialog() }
         btnMute.setOnClickListener { toggleMute() }
         btnResize.setOnClickListener { cycleResizeMode() }
+        btnSettings.setOnClickListener { showSettingsPanel() }
 
         // Remember which button "up" was pressed from, so "down" comes back to the same place.
         val focusTracker = View.OnFocusChangeListener { view, hasFocus ->
@@ -325,6 +341,97 @@ class InternalPlayerActivity : AppCompatActivity() {
         lastFocusedButton = btnPlayPause
     }
 
+    // region settings
+
+    private fun showSettingsPanel() {
+        val clockState = getString(if (playerShowClock) R.string.player_on else R.string.player_off)
+        val labels = listOf(
+            "${getString(R.string.player_clock)}: $clockState",
+            "${getString(R.string.player_buffer)}: " +
+                    getString(R.string.player_buffer_mb, playerBufferMb),
+        )
+        val actions = listOf<() -> Unit>(
+            {
+                playerShowClock = !playerShowClock
+                applyClockVisibility()
+                // Reopen so the row shows the value it now holds.
+                showSettingsPanel()
+            },
+            { showBufferPanel() },
+        )
+        showSidePanel(
+            titleRes = R.string.player_settings,
+            labels = labels,
+            checkedIndex = -1,
+            actions = actions,
+            opener = btnSettings,
+        )
+    }
+
+    private fun showBufferPanel() {
+        val options = Prefs.PLAYER_BUFFER_OPTIONS.toList()
+        showSidePanel(
+            titleRes = R.string.player_buffer,
+            labels = options.map { getString(R.string.player_buffer_mb, it) },
+            checkedIndex = options.indexOf(playerBufferMb),
+            actions = options.map { mb -> { applyBufferSize(mb) } },
+            opener = btnSettings,
+        )
+    }
+
+    /**
+     * ExoPlayer fixes its LoadControl when the instance is built, so a new buffer size means a new
+     * player. Rebuilding keeps the current episode and position, so the change lands immediately
+     * rather than waiting for the next file — that is the point of touching it mid-film.
+     */
+    private fun applyBufferSize(megabytes: Int) {
+        if (megabytes == playerBufferMb) return
+        playerBufferMb = megabytes
+
+        val p = player
+        resumeIndex = p?.currentMediaItemIndex
+        resumePositionMs = p?.currentPosition?.coerceAtLeast(0L)
+
+        handler.removeCallbacksAndMessages(null)
+        releasePlayer()
+        try {
+            initPlayer()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restart with a ${megabytes}MB buffer", e)
+            App.toast(R.string.no_launch_player, true)
+            finish()
+        }
+    }
+
+    private fun applyClockVisibility() {
+        clockView.visibility = if (playerShowClock) View.VISIBLE else View.GONE
+    }
+
+    private fun updateClock() {
+        if (!playerShowClock) return
+        clockView.text = android.text.format.DateFormat.getTimeFormat(this).format(Date())
+    }
+
+    /**
+     * "1:23:45 left · ends at 23:47" — the wall-clock finish is the part people actually plan
+     * around, and working it out from a remaining-time readout is a chore.
+     */
+    private fun updateRemaining(positionMs: Long, durationMs: Long) {
+        if (durationMs <= 0) {
+            remainingText.text = ""
+            return
+        }
+        val leftMs = (durationMs - positionMs).coerceAtLeast(0L)
+        val endsAt = Date(System.currentTimeMillis() + leftMs)
+        remainingText.text = getString(
+            R.string.player_time_left,
+            formatTime(leftMs),
+            android.text.format.DateFormat.getTimeFormat(this).format(endsAt),
+        )
+    }
+
+    // endregion
+
     // region side panel
 
     private val sidePanelOpen: Boolean
@@ -375,7 +482,7 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private fun controlButtons(): List<View> = listOf(
         btnPrevEpisode, btnRewind, btnPlayPause, btnForward, btnNextEpisode,
-        btnAudio, btnSubtitles, btnEpisodes, btnMute, btnResize
+        btnAudio, btnSubtitles, btnEpisodes, btnMute, btnResize, btnSettings
     )
 
     private var pendingSeekMs = 0L
@@ -920,6 +1027,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         lastPosition = position
         if (!scrubbing) positionText.text = formatTime(position)
 
+        updateClock()
+        updateRemaining(position, duration)
         fetchSkipDataForCurrentItem()
         checkSkip(position)
     }
@@ -1071,6 +1180,13 @@ class InternalPlayerActivity : AppCompatActivity() {
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(DefaultDataSource.Factory(this, httpFactory))
             )
+            // How much of the stream is held in memory. LoadControl is fixed at build time, so
+            // changing this setting rebuilds the player (see applyBufferSize).
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setTargetBufferBytes(playerBufferMb * 1024 * 1024)
+                    .build()
+            )
             .build()
 
         exoPlayer.addListener(playerListener)
@@ -1086,8 +1202,13 @@ class InternalPlayerActivity : AppCompatActivity() {
             return
         }
 
-        val startIndex = intent.getIntExtra(Extras.PLAYLIST_INDEX, 0).coerceIn(0, items.size - 1)
-        val startPosition = intent.getLongExtra(Extras.POSITION, 0L).coerceAtLeast(0L)
+        // A rebuild carries its own resume point; a fresh start takes it from the intent.
+        val startIndex = (resumeIndex ?: intent.getIntExtra(Extras.PLAYLIST_INDEX, 0))
+            .coerceIn(0, items.size - 1)
+        val startPosition = (resumePositionMs ?: intent.getLongExtra(Extras.POSITION, 0L))
+            .coerceAtLeast(0L)
+        resumeIndex = null
+        resumePositionMs = null
 
         exoPlayer.setMediaItems(items, startIndex, startPosition)
         exoPlayer.playWhenReady = true
@@ -1096,6 +1217,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         updateTitle()
         updateEpisodeButtons()
         updatePlayPauseIcon()
+        applyClockVisibility()
         handler.post(progressTick)
         startTimecodeReporting()
         showControls()

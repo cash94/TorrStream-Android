@@ -27,6 +27,12 @@ object Prefs {
     private const val TMDB_API_KEY = "tmdb_api_url"
     private const val TMDB_IMG_KEY = "tmdb_image_url"
     private const val MIGRATE_KEY = "migrate"
+    private const val PLAYER_CLOCK_KEY = "player_clock"
+    private const val PLAYER_BUFFER_KEY = "player_buffer_mb"
+
+    /** Buffer sizes offered in the built-in player's settings, in megabytes. */
+    val PLAYER_BUFFER_OPTIONS = intArrayOf(30, 50, 80, 120, 160, 200)
+    const val PLAYER_BUFFER_DEFAULT_MB = 50
 
     // Extension properties for SharedPreferences
     val Context.appPrefs: SharedPreferences
@@ -75,6 +81,16 @@ object Prefs {
     var Context.tmdbImgUrl: String
         get() = appPrefs.getString(TMDB_IMG_KEY, TMDB.IMGURL) ?: TMDB.IMGURL
         set(url) = appPrefs.edit {putString(TMDB_IMG_KEY, url) }
+
+    /** Built-in player: overlay clock in the top corner. */
+    var Context.playerShowClock: Boolean
+        get() = appPrefs.getBoolean(PLAYER_CLOCK_KEY, true)
+        set(value) = appPrefs.edit { putBoolean(PLAYER_CLOCK_KEY, value) }
+
+    /** Built-in player: how much of the stream ExoPlayer keeps buffered, in megabytes. */
+    var Context.playerBufferMb: Int
+        get() = appPrefs.getInt(PLAYER_BUFFER_KEY, PLAYER_BUFFER_DEFAULT_MB)
+        set(value) = appPrefs.edit { putInt(PLAYER_BUFFER_KEY, value) }
 
     val Context.firstRun: Boolean
         get() {
