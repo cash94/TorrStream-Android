@@ -197,6 +197,9 @@ class InternalPlayerActivity : AppCompatActivity() {
     private var sidePanelActions: List<() -> Unit> = emptyList()
     private var sidePanelOpener: View? = null
 
+    /** Set while an item's action swaps in another panel, so the click does not close it. */
+    private var sidePanelReplaced = false
+
     private val handler = Handler(Looper.getMainLooper())
     private var resizeModeIndex = 0
     private var isMuted = false
@@ -334,8 +337,13 @@ class InternalPlayerActivity : AppCompatActivity() {
         }
 
         sidePanelList.setOnItemClickListener { _, _, position, _ ->
-            sidePanelActions.getOrNull(position)?.invoke()
-            hideSidePanel()
+            val action = sidePanelActions.getOrNull(position)
+            sidePanelReplaced = false
+            action?.invoke()
+            // Settings drill into further panels (buffer sizes) and reopen themselves after a
+            // toggle. Those actions have already put new contents on screen, so closing here
+            // would slam the panel shut the moment it opened.
+            if (!sidePanelReplaced) hideSidePanel()
         }
 
         lastFocusedButton = btnPlayPause
@@ -450,7 +458,10 @@ class InternalPlayerActivity : AppCompatActivity() {
     ) {
         sidePanelActions = actions
         sidePanelOpener = opener
+        sidePanelReplaced = true
         sidePanelTitle.setText(titleRes)
+        // Without this the tick from a previous panel (say episode 3) survives into the next one.
+        sidePanelList.clearChoices()
         sidePanelList.adapter = ArrayAdapter(this, R.layout.item_side_panel, labels)
         if (checkedIndex in labels.indices) {
             sidePanelList.setItemChecked(checkedIndex, true)
