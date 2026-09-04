@@ -470,23 +470,10 @@ class MainActivity : BaseActivity(),
 
     private fun setupActivity() {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
-        // Fill the whole panel, cutout included, so no black band is left beside the notch.
-        // enableEdgeToEdge() is still not used: it also opts every view into drawing under the
-        // system bars, and the WebView hands out no insets of its own, so the page would end up
-        // behind the notch. The cutout is covered here and the page is padded off it in
-        // applyCutoutInsets() instead.
-        if (VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window?.attributes = window.attributes.apply {
-                // ALWAYS where it exists: SHORT_EDGES only covers cutouts on the display's short
-                // edges, which leaves the system letterboxing a black band in landscape on some
-                // devices. Anything the cutout would make unreadable is moved by the page itself.
-                layoutInDisplayCutoutMode =
-                    if (VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                    else
-                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            }
-        }
+        // No cutout mode is set here. With targetSdkVersion 28 the platform puts the app in
+        // compatibility mode and reserves the cutout area itself, ignoring the flag entirely, so
+        // setting it only misled the next person to read this. Raising targetSdk is what would
+        // hand the window that area back.
         @Suppress("DEPRECATION")
         if (VERSION.SDK_INT <= Build.VERSION_CODES.TIRAMISU)
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
