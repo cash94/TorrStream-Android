@@ -477,8 +477,14 @@ class MainActivity : BaseActivity(),
         // applyCutoutInsets() instead.
         if (VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window?.attributes = window.attributes.apply {
+                // ALWAYS where it exists: SHORT_EDGES only covers cutouts on the display's short
+                // edges, which leaves the system letterboxing a black band in landscape on some
+                // devices. Anything the cutout would make unreadable is moved by the page itself.
                 layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    if (VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    else
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }
         @Suppress("DEPRECATION")
