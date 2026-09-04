@@ -45,6 +45,10 @@
     <string name="player_off">Off</string>
     <string name="player_buffer_mb">%1$d MB</string>
     <string name="player_time_left">%1$s left · ends at %2$s</string>
+    <string name="player_decoder">Decoder</string>
+    <string name="player_decoder_combined">Combined</string>
+    <string name="player_decoder_hardware">Hardware</string>
+    <string name="player_decoder_software">Software</string>
     <string name="not_found_speech">Failed to start voice input</string>
     <string name="search_is_empty">Enter your search phrase</string>
     <string name="search_no_voice_recognizer">No voice recognition apps</string>

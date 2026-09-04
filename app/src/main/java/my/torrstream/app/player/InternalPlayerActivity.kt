@@ -46,6 +46,9 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -54,6 +57,7 @@ import my.torrstream.app.App
 import my.torrstream.app.R
 import my.torrstream.app.helpers.Prefs
 import my.torrstream.app.helpers.Prefs.playerBufferMb
+import my.torrstream.app.helpers.Prefs.playerDecoderMode
 import my.torrstream.app.helpers.Prefs.playerShowClock
 // Non-transitive R classes are on, so media3's own drawables are not merged into our R.
 import androidx.media3.ui.R as Media3R
@@ -351,12 +355,57 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     // region settings
 
+    /**
+     * Renderers wired to the user's decoder choice.
+     *
+     * Worth knowing what "software" can and cannot reach: the bundled FFmpeg extension decodes
+     * audio only — it ships no video decoder — so software video means Android's own
+     * `c2.android.*` MediaCodec decoders. Those are what usually rescue an AVI carrying
+     * MPEG-4 Part 2 (DivX/Xvid) on a device whose hardware decoder rejects it.
+     */
+    private fun buildRenderersFactory(): DefaultRenderersFactory {
+        val factory = DefaultRenderersFactory(this)
+        return when (playerDecoderMode) {
+            Prefs.DECODER_HARDWARE -> factory
+                .setEnableDecoderFallback(false)
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+                .setMediaCodecSelector(decoderSelector(preferHardware = true))
+
+            Prefs.DECODER_SOFTWARE -> factory
+                .setEnableDecoderFallback(true)
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+                .setMediaCodecSelector(decoderSelector(preferHardware = false))
+
+            // Combined, the default. EXTENSION_RENDERER_MODE_ON, not _PREFER: the platform
+            // renderer keeps first refusal, so HDMI passthrough of AC3/DTS to a receiver still
+            // wins where it is available. The bundled FFmpeg decoders only step in when nothing
+            // else can handle the track — e.g. a DTS-only file on a phone with no DTS decoder.
+            else -> factory
+                .setEnableDecoderFallback(true)
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        }
+    }
+
+    /**
+     * Reorders the candidate decoders rather than filtering them: a device that reports no
+     * decoder of the requested kind should still play the file with the other kind instead of
+     * failing outright.
+     */
+    private fun decoderSelector(preferHardware: Boolean) =
+        MediaCodecSelector { mimeType, requiresSecure, requiresTunneling ->
+            val infos: List<MediaCodecInfo> =
+                MediaCodecUtil.getDecoderInfos(mimeType, requiresSecure, requiresTunneling)
+            infos.sortedByDescending { it.hardwareAccelerated == preferHardware }
+        }
+
+
     private fun showSettingsPanel() {
         val clockState = getString(if (playerShowClock) R.string.player_on else R.string.player_off)
         val labels = listOf(
             "${getString(R.string.player_clock)}: $clockState",
             "${getString(R.string.player_buffer)}: " +
                     getString(R.string.player_buffer_mb, playerBufferMb),
+            "${getString(R.string.player_decoder)}: ${getString(decoderLabelRes(playerDecoderMode))}",
         )
         val actions = listOf<() -> Unit>(
             {
@@ -366,6 +415,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 showSettingsPanel()
             },
             { showBufferPanel() },
+            { showDecoderPanel() },
         )
         showSidePanel(
             titleRes = R.string.player_settings,
@@ -387,15 +437,42 @@ class InternalPlayerActivity : AppCompatActivity() {
         )
     }
 
-    /**
-     * ExoPlayer fixes its LoadControl when the instance is built, so a new buffer size means a new
-     * player. Rebuilding keeps the current episode and position, so the change lands immediately
-     * rather than waiting for the next file — that is the point of touching it mid-film.
-     */
+    private fun decoderLabelRes(mode: Int) = when (mode) {
+        Prefs.DECODER_HARDWARE -> R.string.player_decoder_hardware
+        Prefs.DECODER_SOFTWARE -> R.string.player_decoder_software
+        else -> R.string.player_decoder_combined
+    }
+
+    private fun showDecoderPanel() {
+        val modes = listOf(Prefs.DECODER_COMBINED, Prefs.DECODER_HARDWARE, Prefs.DECODER_SOFTWARE)
+        showSidePanel(
+            titleRes = R.string.player_decoder,
+            labels = modes.map { getString(decoderLabelRes(it)) },
+            checkedIndex = modes.indexOf(playerDecoderMode),
+            actions = modes.map { mode -> { applyDecoderMode(mode) } },
+            opener = btnSettings,
+        )
+    }
+
+    private fun applyDecoderMode(mode: Int) {
+        if (mode == playerDecoderMode) return
+        playerDecoderMode = mode
+        restartPlayer("decoder mode $mode")
+    }
+
     private fun applyBufferSize(megabytes: Int) {
         if (megabytes == playerBufferMb) return
         playerBufferMb = megabytes
+        restartPlayer("${megabytes}MB buffer")
+    }
 
+    /**
+     * Both the LoadControl and the renderers are fixed when the ExoPlayer instance is built, so
+     * changing either setting means a new player. Rebuilding keeps the current episode and
+     * position, so the change lands on what is playing rather than waiting for the next file —
+     * which is the point of reaching for these mid-film.
+     */
+    private fun restartPlayer(what: String) {
         val p = player
         resumeIndex = p?.currentMediaItemIndex
         resumePositionMs = p?.currentPosition?.coerceAtLeast(0L)
@@ -405,7 +482,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         try {
             initPlayer()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to restart with a ${megabytes}MB buffer", e)
+            Log.e(TAG, "Failed to restart with $what", e)
             App.toast(R.string.no_launch_player, true)
             finish()
         }
@@ -1179,13 +1256,7 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         val exoPlayer = ExoPlayer.Builder(
             this,
-            DefaultRenderersFactory(this)
-                .setEnableDecoderFallback(true)
-                // EXTENSION_RENDERER_MODE_ON, not _PREFER: the platform renderer keeps first
-                // refusal, so HDMI passthrough of AC3/DTS to a receiver still wins where it is
-                // available. The bundled FFmpeg decoders only step in when nothing else can
-                // handle the track — e.g. a DTS-only file on a phone with no DTS decoder.
-                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            buildRenderersFactory()
         )
             .setTrackSelector(DefaultTrackSelector(this).also { trackSelector = it })
             .setMediaSourceFactory(

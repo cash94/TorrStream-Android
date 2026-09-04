@@ -43,6 +43,10 @@
     <string name="player_off">Выкл</string>
     <string name="player_buffer_mb">%1$d МБ</string>
     <string name="player_time_left">Осталось %1$s · до %2$s</string>
+    <string name="player_decoder">Декодер</string>
+    <string name="player_decoder_combined">Комбинированный</string>
+    <string name="player_decoder_hardware">Аппаратный</string>
+    <string name="player_decoder_software">Программный</string>
     <string name="not_found_speech">Не удалось запустить голосовой ввод</string>
     <string name="search_is_empty">Введите поисковую фразу</string>
     <string name="search_no_voice_recognizer">Нет приложений для распознавания голоса</string>

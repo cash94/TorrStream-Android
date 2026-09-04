@@ -29,6 +29,14 @@ object Prefs {
     private const val MIGRATE_KEY = "migrate"
     private const val PLAYER_CLOCK_KEY = "player_clock"
     private const val PLAYER_BUFFER_KEY = "player_buffer_mb"
+    private const val PLAYER_DECODER_KEY = "player_decoder"
+
+    /** Hardware first, software picked up whenever hardware cannot handle the track. */
+    const val DECODER_COMBINED = 0
+    /** Platform decoders only — no software fallback, no bundled extensions. */
+    const val DECODER_HARDWARE = 1
+    /** Software decoders preferred, for formats the device's hardware handles badly. */
+    const val DECODER_SOFTWARE = 2
 
     /** Buffer sizes offered in the built-in player's settings, in megabytes. */
     val PLAYER_BUFFER_OPTIONS = intArrayOf(30, 50, 80, 120, 160, 200)
@@ -86,6 +94,11 @@ object Prefs {
     var Context.playerShowClock: Boolean
         get() = appPrefs.getBoolean(PLAYER_CLOCK_KEY, true)
         set(value) = appPrefs.edit { putBoolean(PLAYER_CLOCK_KEY, value) }
+
+    /** Built-in player: which decoders to use — one of the DECODER_* constants. */
+    var Context.playerDecoderMode: Int
+        get() = appPrefs.getInt(PLAYER_DECODER_KEY, DECODER_COMBINED)
+        set(value) = appPrefs.edit { putInt(PLAYER_DECODER_KEY, value) }
 
     /** Built-in player: how much of the stream ExoPlayer keeps buffered, in megabytes. */
     var Context.playerBufferMb: Int
