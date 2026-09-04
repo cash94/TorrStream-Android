@@ -412,6 +412,7 @@ class MainActivity : BaseActivity(),
                     runVoidJsFunc(item[0], item[1])
                 }
                 cacheWebClientId()
+                publishSafeArea()
                 // Background update Android TV channels and recommendations
                 withContext(Dispatchers.Default) {
                     delay(waitDelay)
@@ -425,21 +426,46 @@ class MainActivity : BaseActivity(),
         return duration > 0 && positionMillis >= duration * VIDEO_COMPLETED_DURATION_MAX_PERCENTAGE / 100
     }
 
+    /** Cutout size in CSS pixels, kept so it can be re-published after each page load. */
+    private var safeArea: IntArray? = null
+
     /**
-     * Pads the page off the display cutout while the window keeps covering it.
+     * Hands the display cutout to the page instead of padding the WebView.
      *
-     * The result is that the app's own background runs behind the notch instead of a black band,
-     * and the page starts below it. Applied to the WebView rather than the window because the
-     * window is deliberately full-bleed. Sides matter too: in landscape the cutout is an edge.
+     * Padding the view would shrink the page away from the edges, which is the opposite of what
+     * is wanted: the app should run edge to edge, with its own background and content behind the
+     * notch. Only the elements that would become unreadable there need to move, and the page is
+     * the only thing that knows which those are — so it gets the measurements as CSS variables.
      */
     private fun applyCutoutInsets() {
         val target = findViewById<View>(R.id.webView) ?: return
-        ViewCompat.setOnApplyWindowInsetsListener(target) { view, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(target) { _, insets ->
             val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(cutout.left, cutout.top, cutout.right, cutout.bottom)
+            val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+            safeArea = intArrayOf(
+                (cutout.top / density).toInt(),
+                (cutout.right / density).toInt(),
+                (cutout.bottom / density).toInt(),
+                (cutout.left / density).toInt(),
+            )
+            publishSafeArea()
             insets
         }
         ViewCompat.requestApplyInsets(target)
+    }
+
+    /** Re-run after every page load: a fresh document has none of these variables set. */
+    private fun publishSafeArea() {
+        val area = safeArea ?: return
+        val js = buildString {
+            append("(function(){var s=document.documentElement.style;")
+            append("s.setProperty('--safe-top','").append(area[0]).append("px');")
+            append("s.setProperty('--safe-right','").append(area[1]).append("px');")
+            append("s.setProperty('--safe-bottom','").append(area[2]).append("px');")
+            append("s.setProperty('--safe-left','").append(area[3]).append("px');")
+            append("})()")
+        }
+        browser?.evaluateJavascript(js) { }
     }
 
     private fun setupActivity() {
