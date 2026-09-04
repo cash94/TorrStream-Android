@@ -442,6 +442,15 @@ class MainActivity : BaseActivity(),
         ViewCompat.setOnApplyWindowInsetsListener(target) { _, insets ->
             val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
             val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+            // Measured, not guessed: three attempts at covering the cutout changed nothing on
+            // real hardware, and this says whether the window is even told there is one.
+            Log.i(
+                TAG,
+                "Insets cutout=$cutout " +
+                        "systemBars=${insets.getInsets(WindowInsetsCompat.Type.systemBars())} " +
+                        "displayCutout=${window?.decorView?.rootWindowInsets?.displayCutout} " +
+                        "mode=${window?.attributes?.layoutInDisplayCutoutMode}",
+            )
             safeArea = intArrayOf(
                 (cutout.top / density).toInt(),
                 (cutout.right / density).toInt(),
