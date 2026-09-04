@@ -35,7 +35,6 @@ import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.addCallback
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -426,7 +425,11 @@ class MainActivity : BaseActivity(),
 
     private fun setupActivity() {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
-        enableEdgeToEdge()
+        // No enableEdgeToEdge() here on purpose. It opts the window into drawing under the
+        // system bars *and* into the display cutout, which the page cannot compensate for: the
+        // WebView fills the window and hands out no insets of its own, so on a notched phone the
+        // top of the page ends up behind the notch. The window is already full screen through the
+        // theme and hideSystemUI(), so nothing is lost by leaving the cutout alone.
         @Suppress("DEPRECATION")
         if (VERSION.SDK_INT <= Build.VERSION_CODES.TIRAMISU)
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
