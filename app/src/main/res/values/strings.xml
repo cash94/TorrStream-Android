@@ -45,6 +45,14 @@
     <string name="player_off">Off</string>
     <string name="player_buffer_mb">%1$d MB</string>
     <string name="player_time_left">%1$s left · ends at %2$s</string>
+    <string name="player_buffer_fill">Buffer: %1$d%%</string>
+    <string name="player_clock_desc">Current time over the video</string>
+    <string name="player_buffer_desc">How much is loaded ahead. More survives a shaky connection</string>
+    <string name="player_decoder_desc">What decodes the video and audio</string>
+    <string name="player_decoder_combined_desc">Hardware, switching to software when a format is unsupported</string>
+    <string name="player_decoder_hardware_desc">Hardware only. No sound where AC3/DTS is unsupported</string>
+    <string name="player_decoder_software_desc">Software first. Helps with AVI (DivX/Xvid), loads the CPU</string>
+    <string name="player_playback_failed">Cannot play: %1$s</string>
     <string name="player_decoder">Decoder</string>
     <string name="player_decoder_combined">Combined</string>
     <string name="player_decoder_hardware">Hardware</string>

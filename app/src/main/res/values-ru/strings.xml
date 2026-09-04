@@ -42,7 +42,15 @@
     <string name="player_on">Вкл</string>
     <string name="player_off">Выкл</string>
     <string name="player_buffer_mb">%1$d МБ</string>
-    <string name="player_time_left">Осталось %1$s · до %2$s</string>
+    <string name="player_time_left">Осталось %1$s · конец в %2$s</string>
+    <string name="player_buffer_fill">Буфер: %1$d%%</string>
+    <string name="player_clock_desc">Текущее время поверх видео</string>
+    <string name="player_buffer_desc">Сколько загружать наперёд. Больше — устойчивее к обрывам связи</string>
+    <string name="player_decoder_desc">Чем декодировать видео и звук</string>
+    <string name="player_decoder_combined_desc">Аппаратный, с переходом на программный, если формат не поддерживается</string>
+    <string name="player_decoder_hardware_desc">Только аппаратный. Без звука там, где нет поддержки AC3/DTS</string>
+    <string name="player_decoder_software_desc">Программный в приоритете. Помогает с AVI (DivX/Xvid), грузит процессор</string>
+    <string name="player_playback_failed">Не удалось воспроизвести: %1$s</string>
     <string name="player_decoder">Декодер</string>
     <string name="player_decoder_combined">Комбинированный</string>
     <string name="player_decoder_hardware">Аппаратный</string>

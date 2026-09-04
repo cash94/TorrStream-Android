@@ -42,7 +42,15 @@
     <string name="player_on">开</string>
     <string name="player_off">关</string>
     <string name="player_buffer_mb">%1$d MB</string>
-    <string name="player_time_left">剩余 %1$s · 结束于 %2$s</string>
+    <string name="player_time_left">剩余 %1$s · %2$s 结束</string>
+    <string name="player_buffer_fill">缓冲：%1$d%%</string>
+    <string name="player_clock_desc">在视频上方显示当前时间</string>
+    <string name="player_buffer_desc">预加载多少内容。越多越能抵抗网络中断</string>
+    <string name="player_decoder_desc">用什么解码视频和音频</string>
+    <string name="player_decoder_combined_desc">硬件解码，格式不支持时切换到软件解码</string>
+    <string name="player_decoder_hardware_desc">仅硬件解码。不支持 AC3/DTS 的设备将没有声音</string>
+    <string name="player_decoder_software_desc">优先软件解码。对 AVI (DivX/Xvid) 有帮助，占用处理器</string>
+    <string name="player_playback_failed">无法播放：%1$s</string>
     <string name="player_decoder">解码器</string>
     <string name="player_decoder_combined">混合</string>
     <string name="player_decoder_hardware">硬件</string>

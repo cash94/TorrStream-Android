@@ -43,7 +43,12 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
@@ -108,6 +113,10 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val TYPE_INTRO = "intro"
         private const val TYPE_CREDITS = "credits"
         private const val SKIP_BUTTON_TIMEOUT_MS = 10_000L
+        private const val SCREEN_SAVER_DELAY_MS = 15_000L
+        private const val SCREEN_SAVER_DIM = 0.75f
+        private const val NEW_LINE = "\n"
+        private const val SEPARATOR = "  \u00B7  "
 
         private const val TIMECODE_SAVE_INTERVAL_MS = 30_000L
         /** Below this the position isn't worth resuming from — matches the web player. */
@@ -167,6 +176,11 @@ class InternalPlayerActivity : AppCompatActivity() {
     private lateinit var btnSettings: ImageButton
     private lateinit var clockView: TextView
     private lateinit var remainingText: TextView
+    private lateinit var dimOverlay: View
+
+    /** Kept so the status line can report how full the buffer actually is. */
+    private var loadControl: DefaultLoadControl? = null
+    private var screenSaverOn = false
 
     /** Set when the player is rebuilt (buffer change) so playback resumes where it left off. */
     private var resumeIndex: Int? = null
@@ -257,6 +271,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         btnSettings = findViewById(R.id.btnSettings)
         clockView = findViewById(R.id.playerClock)
         remainingText = findViewById(R.id.remainingText)
+        dimOverlay = findViewById(R.id.dimOverlay)
 
         seekOverlay = findViewById(R.id.seekOverlay)
         seekOverlayTime = findViewById(R.id.seekOverlayTime)
@@ -330,6 +345,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         // Touch: tapping the picture toggles the HUD, or dismisses the slide-out list.
         findViewById<View>(R.id.playerRoot).setOnClickListener {
             when {
+                wakeFromScreenSaver() -> Unit
                 sidePanelOpen -> hideSidePanel()
                 controlsVisible -> {
                     handler.removeCallbacks(hideControls)
@@ -352,6 +368,43 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         lastFocusedButton = btnPlayPause
     }
+
+    // region pause screen saver
+
+    /**
+     * A paused frame left on screen for long enough is what burns an OLED panel, so a pause that
+     * outlasts the delay drops the HUD and dims everything. Any key or tap brings it back, and the
+     * press that wakes is swallowed so it does nothing else.
+     */
+    private val enterScreenSaver = Runnable {
+        if (player?.isPlaying == true) return@Runnable
+        screenSaverOn = true
+        setControlsVisible(false)
+        hideSidePanel()
+        clockView.visibility = View.GONE
+        dimOverlay.visibility = View.VISIBLE
+        dimOverlay.animate().alpha(SCREEN_SAVER_DIM).setDuration(600).start()
+    }
+
+    private fun scheduleScreenSaver(isPlaying: Boolean) {
+        handler.removeCallbacks(enterScreenSaver)
+        if (!isPlaying) handler.postDelayed(enterScreenSaver, SCREEN_SAVER_DELAY_MS)
+    }
+
+    /** True when it actually woke something, so callers can swallow the event that did it. */
+    private fun wakeFromScreenSaver(): Boolean {
+        handler.removeCallbacks(enterScreenSaver)
+        if (!screenSaverOn) return false
+        screenSaverOn = false
+        dimOverlay.animate().alpha(0f).setDuration(200)
+            .withEndAction { dimOverlay.visibility = View.GONE }.start()
+        applyClockVisibility()
+        showControls()
+        scheduleScreenSaver(player?.isPlaying == true)
+        return true
+    }
+
+    // endregion
 
     // region settings
 
@@ -402,10 +455,20 @@ class InternalPlayerActivity : AppCompatActivity() {
     private fun showSettingsPanel() {
         val clockState = getString(if (playerShowClock) R.string.player_on else R.string.player_off)
         val labels = listOf(
-            "${getString(R.string.player_clock)}: $clockState",
-            "${getString(R.string.player_buffer)}: " +
-                    getString(R.string.player_buffer_mb, playerBufferMb),
-            "${getString(R.string.player_decoder)}: ${getString(decoderLabelRes(playerDecoderMode))}",
+            withDescription(
+                "${getString(R.string.player_clock)}: $clockState",
+                R.string.player_clock_desc,
+            ),
+            withDescription(
+                "${getString(R.string.player_buffer)}: " +
+                        getString(R.string.player_buffer_mb, playerBufferMb),
+                R.string.player_buffer_desc,
+            ),
+            withDescription(
+                "${getString(R.string.player_decoder)}: " +
+                        getString(decoderLabelRes(playerDecoderMode)),
+                R.string.player_decoder_desc,
+            ),
         )
         val actions = listOf<() -> Unit>(
             {
@@ -423,6 +486,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             checkedIndex = -1,
             actions = actions,
             opener = btnSettings,
+            itemLayout = R.layout.item_side_panel_desc,
         )
     }
 
@@ -437,6 +501,28 @@ class InternalPlayerActivity : AppCompatActivity() {
         )
     }
 
+    private fun decoderDescriptionRes(mode: Int) = when (mode) {
+        Prefs.DECODER_HARDWARE -> R.string.player_decoder_hardware_desc
+        Prefs.DECODER_SOFTWARE -> R.string.player_decoder_software_desc
+        else -> R.string.player_decoder_combined_desc
+    }
+
+    /** Title with an explanatory second line, dimmer and smaller so the choice still reads first. */
+    private fun withDescription(title: String, descriptionRes: Int): CharSequence {
+        val builder = SpannableStringBuilder(title)
+            .append(NEW_LINE)
+            .append(getString(descriptionRes))
+        val from = title.length + 1
+        builder.setSpan(
+            RelativeSizeSpan(0.75f), from, builder.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+        builder.setSpan(
+            ForegroundColorSpan(0xB3FFFFFF.toInt()), from, builder.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+        return builder
+    }
+
     private fun decoderLabelRes(mode: Int) = when (mode) {
         Prefs.DECODER_HARDWARE -> R.string.player_decoder_hardware
         Prefs.DECODER_SOFTWARE -> R.string.player_decoder_software
@@ -447,10 +533,13 @@ class InternalPlayerActivity : AppCompatActivity() {
         val modes = listOf(Prefs.DECODER_COMBINED, Prefs.DECODER_HARDWARE, Prefs.DECODER_SOFTWARE)
         showSidePanel(
             titleRes = R.string.player_decoder,
-            labels = modes.map { getString(decoderLabelRes(it)) },
+            labels = modes.map {
+                withDescription(getString(decoderLabelRes(it)), decoderDescriptionRes(it))
+            },
             checkedIndex = modes.indexOf(playerDecoderMode),
             actions = modes.map { mode -> { applyDecoderMode(mode) } },
             opener = btnSettings,
+            itemLayout = R.layout.item_side_panel_desc,
         )
     }
 
@@ -501,18 +590,30 @@ class InternalPlayerActivity : AppCompatActivity() {
      * "1:23:45 left · ends at 23:47" — the wall-clock finish is the part people actually plan
      * around, and working it out from a remaining-time readout is a chore.
      */
-    private fun updateRemaining(positionMs: Long, durationMs: Long) {
-        if (durationMs <= 0) {
-            remainingText.text = ""
-            return
+    private fun updateStatusLine(positionMs: Long, durationMs: Long) {
+        val parts = mutableListOf(getString(R.string.player_buffer_fill, bufferFillPercent()))
+        if (durationMs > 0) {
+            val leftMs = (durationMs - positionMs).coerceAtLeast(0L)
+            val endsAt = Date(System.currentTimeMillis() + leftMs)
+            parts += getString(
+                R.string.player_time_left,
+                formatTime(leftMs),
+                android.text.format.DateFormat.getTimeFormat(this).format(endsAt),
+            )
         }
-        val leftMs = (durationMs - positionMs).coerceAtLeast(0L)
-        val endsAt = Date(System.currentTimeMillis() + leftMs)
-        remainingText.text = getString(
-            R.string.player_time_left,
-            formatTime(leftMs),
-            android.text.format.DateFormat.getTimeFormat(this).format(endsAt),
-        )
+        remainingText.text = parts.joinToString(SEPARATOR)
+    }
+
+    /**
+     * How full the buffer is, against the size chosen in settings. Taken from the allocator's own
+     * byte count rather than ExoPlayer's bufferedPercentage, which measures progress through the
+     * whole file and would sit near zero for an entire film.
+     */
+    private fun bufferFillPercent(): Int {
+        val target = playerBufferMb * 1024L * 1024L
+        val allocated = loadControl?.allocator?.totalBytesAllocated?.toLong() ?: return 0
+        if (target <= 0L) return 0
+        return ((allocated * 100L) / target).toInt().coerceIn(0, 100)
     }
 
     // endregion
@@ -528,10 +629,11 @@ class InternalPlayerActivity : AppCompatActivity() {
      */
     private fun showSidePanel(
         titleRes: Int,
-        labels: List<String>,
+        labels: List<CharSequence>,
         checkedIndex: Int,
         actions: List<() -> Unit>,
-        opener: View?
+        opener: View?,
+        itemLayout: Int = R.layout.item_side_panel,
     ) {
         sidePanelActions = actions
         sidePanelOpener = opener
@@ -539,7 +641,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         sidePanelTitle.setText(titleRes)
         // Without this the tick from a previous panel (say episode 3) survives into the next one.
         sidePanelList.clearChoices()
-        sidePanelList.adapter = ArrayAdapter(this, R.layout.item_side_panel, labels)
+        sidePanelList.adapter = ArrayAdapter(this, itemLayout, labels)
         if (checkedIndex in labels.indices) {
             sidePanelList.setItemChecked(checkedIndex, true)
             sidePanelList.setSelection(checkedIndex)
@@ -671,6 +773,8 @@ class InternalPlayerActivity : AppCompatActivity() {
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
+            // While dimmed, the first press only wakes: it should not also seek or open a panel.
+            if (wakeFromScreenSaver()) return true
             // The slide-out list owns the remote while it is open: up/down walk the list, and
             // left/back close it (left, because the panel sits against the right edge).
             if (sidePanelOpen) {
@@ -1116,7 +1220,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         if (!scrubbing) positionText.text = formatTime(position)
 
         updateClock()
-        updateRemaining(position, duration)
+        updateStatusLine(position, duration)
         fetchSkipDataForCurrentItem()
         checkSkip(position)
     }
@@ -1268,6 +1372,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 DefaultLoadControl.Builder()
                     .setTargetBufferBytes(playerBufferMb * 1024 * 1024)
                     .build()
+                    .also { loadControl = it }
             )
             .build()
 
@@ -1404,7 +1509,13 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             updatePlayPauseIcon()
-            if (isPlaying) showControls() else handler.removeCallbacks(hideControls)
+            if (isPlaying) {
+                wakeFromScreenSaver()
+                showControls()
+            } else {
+                handler.removeCallbacks(hideControls)
+            }
+            scheduleScreenSaver(isPlaying)
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -1446,9 +1557,21 @@ class InternalPlayerActivity : AppCompatActivity() {
                 }
             }
 
-            App.toast(R.string.no_launch_player, true)
+            // Name what actually failed. "Unsupported" on its own sends the user nowhere;
+            // the codec and error code say whether another decoder mode could help at all.
+            val detail = listOfNotNull(error.formatDetail(), error.errorCodeName)
+                .joinToString(", ")
+            Log.e(TAG, "Giving up on playback: $detail")
+            App.toast(getString(R.string.player_playback_failed, detail), true)
             finish()
         }
+
+        /** The offending track's mime and codec string, when the error carries a format. */
+        private fun PlaybackException.formatDetail(): String? =
+            (this as? ExoPlaybackException)?.rendererFormat?.let { format ->
+                listOfNotNull(format.sampleMimeType, format.codecs).joinToString(" ")
+                    .takeIf { it.isNotBlank() }
+            }
 
         private fun PlaybackException.isDecoderError(): Boolean = errorCode in setOf(
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,

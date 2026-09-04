@@ -45,7 +45,8 @@
         android:shadowDy="0"
         android:shadowRadius="6"
         android:textColor="@android:color/white"
-        android:textSize="18sp"
+        android:textSize="20sp"
+        android:textStyle="bold"
         tools:ignore="HardcodedText"
         tools:text="23:47" />
 
@@ -117,11 +118,11 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:gravity="end"
+            android:gravity="center"
             android:textColor="#B3FFFFFF"
             android:textSize="13sp"
             tools:ignore="HardcodedText"
-            tools:text="Осталось 1:23:45 · до 23:47" />
+            tools:text="Буфер: 87% · Осталось 1:23:45 · конец в 23:47" />
 
         <LinearLayout
             android:id="@+id/buttonsRow"
@@ -338,5 +339,17 @@
             android:paddingBottom="24dp"
             android:scrollbars="none" />
     </LinearLayout>
+
+    <!-- Затемнение на длительной паузе: статичный кадр вредит матрице, особенно OLED.
+         Не кликабельно и не фокусируемо, чтобы нажатия доходили до активити и будили плеер. -->
+    <View
+        android:id="@+id/dimOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0"
+        android:background="@android:color/black"
+        android:clickable="false"
+        android:focusable="false"
+        android:visibility="gone" />
 
 </FrameLayout>
