@@ -20,6 +20,7 @@
     <string name="select_player">Выбор плеера</string>
     <string name="internal_player">Встроенный плеер</string>
     <string name="audio_unsupported">Аудиоформат не поддерживается — видео воспроизводится без звука</string>
+    <string name="audio_unsupported_format">Звук не поддерживается: %1$s — воспроизведение без звука</string>
     <string name="player_prev_episode">Предыдущая серия</string>
     <string name="player_rewind">Назад на 15 секунд</string>
     <string name="player_play_pause">Воспроизведение или пауза</string>

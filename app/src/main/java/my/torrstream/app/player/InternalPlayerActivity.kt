@@ -1491,7 +1491,26 @@ class InternalPlayerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * The one thing worth knowing when a file will not play is what is actually inside it, so an
+     * "it does not work" report can name the codec instead of describing the symptom.
+     */
+    private fun logTracks(tracks: Tracks) {
+        tracks.groups.forEach { group ->
+            for (i in 0 until group.length) {
+                val format = group.getTrackFormat(i)
+                Log.i(
+                    TAG,
+                    "Track ${format.sampleMimeType} codecs=${format.codecs} " +
+                            "supported=${group.isTrackSupported(i)} " +
+                            "selected=${group.isTrackSelected(i)}",
+                )
+            }
+        }
+    }
+
     private val playerListener = object : Player.Listener {
+
         override fun onPlaybackStateChanged(playbackState: Int) {
             progressBar.visibility =
                 if (playbackState == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
@@ -1530,6 +1549,7 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         override fun onTracksChanged(tracks: Tracks) {
             updateEpisodeButtons()
+            logTracks(tracks)
         }
 
         override fun onEvents(p: Player, events: Player.Events) {
@@ -1543,7 +1563,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             // A codec the device can't handle should cost the sound, not the whole film: drop the
             // audio track and carry on. Only reached when neither a platform decoder, HDMI
             // passthrough nor the bundled FFmpeg decoders could take the track.
-            if (!audioDisabledAfterError && error.isDecoderError()) {
+            if (!audioDisabledAfterError && error.isAudioDecoderError()) {
                 val selector = trackSelector
                 if (selector != null) {
                     audioDisabledAfterError = true
@@ -1551,7 +1571,13 @@ class InternalPlayerActivity : AppCompatActivity() {
                     selector.parameters = selector.buildUponParameters()
                         .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
                         .build()
-                    App.toast(R.string.audio_unsupported, true)
+                    App.toast(
+                        getString(
+                            R.string.audio_unsupported_format,
+                            error.formatDetail() ?: "?",
+                        ),
+                        true,
+                    )
                     player?.prepare()
                     return
                 }
@@ -1572,6 +1598,16 @@ class InternalPlayerActivity : AppCompatActivity() {
                 listOfNotNull(format.sampleMimeType, format.codecs).joinToString(" ")
                     .takeIf { it.isNotBlank() }
             }
+
+        /**
+         * Dropping the audio track only rescues playback when it was the audio decoder that gave
+         * up. The same error codes arrive from the video renderer, and silencing the film in that
+         * case fixes nothing while hiding what actually broke.
+         */
+        private fun PlaybackException.isAudioDecoderError(): Boolean {
+            val mime = (this as? ExoPlaybackException)?.rendererFormat?.sampleMimeType
+            return isDecoderError() && mime?.startsWith("audio/") == true
+        }
 
         private fun PlaybackException.isDecoderError(): Boolean = errorCode in setOf(
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
