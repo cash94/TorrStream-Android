@@ -23,6 +23,7 @@
     <string name="internal_player">Built-in player</string>
     <string name="audio_unsupported">Audio format is not supported — playing video without sound</string>
     <string name="audio_unsupported_format">Audio not supported: %1$s — playing without sound</string>
+    <string name="player_switching_software">Hardware decoder failed - switching to software</string>
     <string name="player_prev_episode">Previous episode</string>
     <string name="player_rewind">Rewind 15 seconds</string>
     <string name="player_play_pause">Play or pause</string>

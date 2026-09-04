@@ -182,6 +182,13 @@ class InternalPlayerActivity : AppCompatActivity() {
     private var loadControl: DefaultLoadControl? = null
     private var screenSaverOn = false
 
+    /**
+     * Set after a hardware decoder fails mid-stream. Deliberately not written to preferences: it
+     * rescues this file, it should not quietly change what every later file uses.
+     */
+    private var softwareVideoFallback = false
+    private var videoFallbackTried = false
+
     /** Set when the player is rebuilt (buffer change) so playback resumes where it left off. */
     private var resumeIndex: Int? = null
     private var resumePositionMs: Long? = null
@@ -418,7 +425,8 @@ class InternalPlayerActivity : AppCompatActivity() {
      */
     private fun buildRenderersFactory(): DefaultRenderersFactory {
         val factory = DefaultRenderersFactory(this)
-        return when (playerDecoderMode) {
+        val mode = if (softwareVideoFallback) Prefs.DECODER_SOFTWARE else playerDecoderMode
+        return when (mode) {
             Prefs.DECODER_HARDWARE -> factory
                 .setEnableDecoderFallback(false)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
@@ -1583,6 +1591,23 @@ class InternalPlayerActivity : AppCompatActivity() {
                 }
             }
 
+            // What "combined" is supposed to mean. ExoPlayer's own decoder fallback only
+            // covers a decoder that fails to *initialise*; a decoder that starts and then chokes
+            // partway through — which is how MPEG-4 in AVI tends to fail — never reached the
+            // software path at all.
+            if (!videoFallbackTried &&
+                playerDecoderMode == Prefs.DECODER_COMBINED &&
+                error.isVideoFailure()
+            ) {
+                videoFallbackTried = true
+                softwareVideoFallback = true
+                Log.w(TAG, "Hardware video decoder failed, retrying in software: ${error.errorCodeName}")
+                App.toast(R.string.player_switching_software, true)
+                // Posted, not called inline: this runs inside the player's own error callback.
+                handler.post { restartPlayer("software video fallback") }
+                return
+            }
+
             // Name what actually failed. "Unsupported" on its own sends the user nowhere;
             // the codec and error code say whether another decoder mode could help at all.
             val detail = listOfNotNull(error.formatDetail(), error.errorCodeName)
@@ -1590,6 +1615,18 @@ class InternalPlayerActivity : AppCompatActivity() {
             Log.e(TAG, "Giving up on playback: $detail")
             App.toast(getString(R.string.player_playback_failed, detail), true)
             finish()
+        }
+
+        /**
+         * A video failure worth retrying in software: a decoder error, or the unexpected-runtime
+         * error that a struggling codec surfaces as. A null format means the player could not say
+         * which renderer broke, and video is the one worth trying again.
+         */
+        private fun PlaybackException.isVideoFailure(): Boolean {
+            val mime = (this as? ExoPlaybackException)?.rendererFormat?.sampleMimeType
+            val retryable = isDecoderError() ||
+                    errorCode == PlaybackException.ERROR_CODE_FAILED_RUNTIME_CHECK
+            return retryable && (mime == null || mime.startsWith("video/"))
         }
 
         /** The offending track's mime and codec string, when the error carries a format. */

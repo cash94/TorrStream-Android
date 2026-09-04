@@ -21,6 +21,7 @@
     <string name="internal_player">内置播放器</string>
     <string name="audio_unsupported">不支持该音频格式 — 将以无声方式播放视频</string>
     <string name="audio_unsupported_format">不支持的音频：%1$s — 将以无声方式播放</string>
+    <string name="player_switching_software">硬件解码失败 - 切换到软件解码</string>
     <string name="player_prev_episode">上一集</string>
     <string name="player_rewind">快退15秒</string>
     <string name="player_play_pause">播放或暂停</string>
