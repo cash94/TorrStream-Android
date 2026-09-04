@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Вращающаяся дуга: развёртка от прозрачного через фирменный синий к оранжевому,
+     из-за чего у кольца получается «хвост», а не сплошной обод. -->
+<rotate xmlns:android="http://schemas.android.com/apk/res/android"
+    android:fromDegrees="0"
+    android:pivotX="50%"
+    android:pivotY="50%"
+    android:toDegrees="360">
+    <shape
+        android:innerRadiusRatio="2.7"
+        android:shape="ring"
+        android:thicknessRatio="11"
+        android:useLevel="false">
+        <gradient
+            android:centerColor="#994A9EFF"
+            android:endColor="#FFFF8C00"
+            android:startColor="#00FF8C00"
+            android:type="sweep" />
+    </shape>
+</rotate>

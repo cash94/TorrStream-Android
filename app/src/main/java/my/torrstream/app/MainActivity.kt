@@ -39,6 +39,8 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.appcompat.widget.AppCompatImageButton
@@ -120,7 +122,7 @@ class MainActivity : BaseActivity(),
     private var browserInitComplete = false
     private var isMenuVisible = false
     private var isPlayerLaunching = false // suppress WebView pauseTimers while our external player is open
-    private lateinit var loaderView: LottieAnimationView
+    private lateinit var loaderView: View
     private lateinit var resultLauncher: ActivityResultLauncher<Intent>
     private lateinit var speechLauncher: ActivityResultLauncher<Intent>
     private lateinit var progressIndicator: LinearProgressIndicator
@@ -423,13 +425,36 @@ class MainActivity : BaseActivity(),
         return duration > 0 && positionMillis >= duration * VIDEO_COMPLETED_DURATION_MAX_PERCENTAGE / 100
     }
 
+    /**
+     * Pads the page off the display cutout while the window keeps covering it.
+     *
+     * The result is that the app's own background runs behind the notch instead of a black band,
+     * and the page starts below it. Applied to the WebView rather than the window because the
+     * window is deliberately full-bleed. Sides matter too: in landscape the cutout is an edge.
+     */
+    private fun applyCutoutInsets() {
+        val target = findViewById<View>(R.id.webView) ?: return
+        ViewCompat.setOnApplyWindowInsetsListener(target) { view, insets ->
+            val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(cutout.left, cutout.top, cutout.right, cutout.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(target)
+    }
+
     private fun setupActivity() {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
-        // No enableEdgeToEdge() here on purpose. It opts the window into drawing under the
-        // system bars *and* into the display cutout, which the page cannot compensate for: the
-        // WebView fills the window and hands out no insets of its own, so on a notched phone the
-        // top of the page ends up behind the notch. The window is already full screen through the
-        // theme and hideSystemUI(), so nothing is lost by leaving the cutout alone.
+        // Fill the whole panel, cutout included, so no black band is left beside the notch.
+        // enableEdgeToEdge() is still not used: it also opts every view into drawing under the
+        // system bars, and the WebView hands out no insets of its own, so the page would end up
+        // behind the notch. The cutout is covered here and the page is padded off it in
+        // applyCutoutInsets() instead.
+        if (VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window?.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
         @Suppress("DEPRECATION")
         if (VERSION.SDK_INT <= Build.VERSION_CODES.TIRAMISU)
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
@@ -469,6 +494,7 @@ class MainActivity : BaseActivity(),
     private fun useSystemWebView() {
         setContentView(R.layout.activity_webview)
         loaderView = findViewById(R.id.loaderView)
+        applyCutoutInsets()
         browser = SysView(this, R.id.webView)
         browser?.initialize()
     }

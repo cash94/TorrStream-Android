@@ -30,18 +30,50 @@
         app:tint="@null"
         tools:visibility="visible" />
 
-    <com.airbnb.lottie.LottieAnimationView
+    <!-- Экран загрузки. Занимает всё окно и несёт собственный градиент, поэтому перекрывает
+         то, что под ним, и не зависит от порядка появления WebView. -->
+    <FrameLayout
         android:id="@+id/loaderView"
-        android:layout_width="640dp"
-        android:layout_height="640dp"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/loader_backdrop"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.5"
-        app:lottie_autoPlay="true"
-        app:lottie_loop="true"
-        app:lottie_rawRes="@raw/loader" />
+        app:layout_constraintTop_toTopOf="parent">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <FrameLayout
+                android:layout_width="132dp"
+                android:layout_height="132dp"
+                android:background="@drawable/loader_glow">
+
+                <ProgressBar
+                    android:layout_width="76dp"
+                    android:layout_height="76dp"
+                    android:layout_gravity="center"
+                    android:indeterminate="true"
+                    android:indeterminateDrawable="@drawable/loader_ring"
+                    android:indeterminateDuration="1100" />
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:letterSpacing="0.14"
+                android:text="@string/app_name"
+                android:textColor="#FF8C00"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </FrameLayout>
 
     <my.torrstream.app.browser.LampaWebView
         android:id="@+id/webView"
