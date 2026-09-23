@@ -113,6 +113,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val TYPE_INTRO = "intro"
         private const val TYPE_CREDITS = "credits"
         private const val SKIP_BUTTON_TIMEOUT_MS = 10_000L
+        private const val STATS_INTERVAL_MS = 1_000L
+        private val HASH_RE = Regex("^[0-9a-fA-F]{40}$")
         private const val SCREEN_SAVER_DELAY_MS = 15_000L
         private const val SCREEN_SAVER_DIM = 0.75f
         private const val NEW_LINE = "\n"
@@ -158,6 +160,9 @@ class InternalPlayerActivity : AppCompatActivity() {
     private lateinit var playerView: PlayerView
     private lateinit var progressBar: ProgressBar
     private lateinit var titleView: TextView
+    private lateinit var headerView: View
+    private lateinit var statsView: TextView
+    private var statsJob: Job? = null
     private lateinit var controlsPanel: View
     private lateinit var seekBar: SeekBar
     private lateinit var positionText: TextView
@@ -260,6 +265,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         playerView = findViewById(R.id.playerView)
         progressBar = findViewById(R.id.playerProgress)
         titleView = findViewById(R.id.playerTitle)
+        headerView = findViewById(R.id.playerHeader)
+        statsView = findViewById(R.id.playerStats)
         controlsPanel = findViewById(R.id.controlsPanel)
         seekBar = findViewById(R.id.seekBar)
         positionText = findViewById(R.id.positionText)
@@ -759,7 +766,9 @@ class InternalPlayerActivity : AppCompatActivity() {
     private fun setControlsVisible(visible: Boolean) {
         val wasVisible = controlsPanel.visibility == View.VISIBLE
         controlsPanel.visibility = if (visible) View.VISIBLE else View.GONE
-        titleView.visibility = if (visible) View.VISIBLE else View.GONE
+        headerView.visibility = if (visible) View.VISIBLE else View.GONE
+        // Статистику TorrServer опрашиваем, только пока её видно
+        if (visible) startTorrStats() else stopTorrStats()
         // The read-out belongs to the seek bar; without the bar there is nothing to read.
         if (!visible) {
             handler.removeCallbacks(hideSeekOverlay)
@@ -1357,6 +1366,130 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     // endregion
 
+    // region TorrServer stats
+
+    /**
+     * Строка под заголовком — та же, что в веб-плеере (public/js/torrserverstats.js и
+     * player.js): «TorrServer: 1.2 GB | скорость: 24.6 Mb/s | пиры: 12 / 48 - 7».
+     *
+     * Данные — POST <TorrServer>/cache {action: get, hash}. Адрес TorrServer и хэш берутся из
+     * ссылки текущего элемента (<ts>/stream?link=<hash>&index=<n>), поэтому на следующей серии
+     * строка переключается сама. Опрос раз в секунду и только пока HUD виден: скрытую строку
+     * никто не читает, а TorrServer на слабом роутере лишние запросы замечает.
+     */
+    private fun startTorrStats() {
+        if (statsJob?.isActive == true) return
+        statsJob = lifecycleScope.launch {
+            while (isActive) {
+                val target = currentTorrTarget()
+                if (target == null) {
+                    // Не поток TorrServer (IPTV, прямая ссылка) — строке нечего показать
+                    statsView.visibility = View.GONE
+                    break
+                }
+                val text = withContext(Dispatchers.IO) { loadTorrStats(target.first, target.second) }
+                if (text != null) {
+                    statsView.text = text
+                    statsView.visibility = View.VISIBLE
+                }
+                delay(STATS_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun stopTorrStats() {
+        statsJob?.cancel()
+        statsJob = null
+    }
+
+    /** (адрес TorrServer, хэш) текущего элемента; null — это не поток TorrServer. */
+    private fun currentTorrTarget(): Pair<String, String>? {
+        val uri = player?.currentMediaItem?.localConfiguration?.uri ?: intent.data ?: return null
+        val path = uri.path ?: return null
+        val authority = "${uri.scheme}://${uri.encodedAuthority}"
+
+        // <ts>/stream?link=<hash>&index=<n> — так ссылки строит веб-клиент
+        val streamAt = path.lastIndexOf("/stream")
+        val link = uri.getQueryParameter("link")
+        if (streamAt >= 0 && link != null && HASH_RE.matches(link)) {
+            return authority + path.substring(0, streamAt) to link.lowercase(Locale.US)
+        }
+
+        // <ts>/play/<hash>/<n> — прямые ссылки на файл
+        val segments = uri.pathSegments
+        val playAt = segments.indexOf("play")
+        if (playAt >= 0 && playAt + 1 < segments.size && HASH_RE.matches(segments[playAt + 1])) {
+            val prefix = segments.subList(0, playAt).joinToString("") { "/$it" }
+            return authority + prefix to segments[playAt + 1].lowercase(Locale.US)
+        }
+        return null
+    }
+
+    private fun loadTorrStats(base: String, hash: String): String? {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("$base/cache").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 4_000
+                readTimeout = 4_000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                // Те же заголовки, что у видеопотока: среди них Basic-авторизация TorrServer
+                torrHeaders.forEach { (key, value) -> setRequestProperty(key, value) }
+            }
+            val request = JSONObject().put("action", "get").put("hash", hash).toString()
+            connection.outputStream.use { it.write(request.toByteArray()) }
+            if (connection.responseCode !in 200..299) return null
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val root = JSONObject(body)
+            // Данные бывают и в Torrent, и прямо в корне — как разбирает веб
+            formatTorrStats(root.optJSONObject("Torrent") ?: root)
+        } catch (e: Exception) {
+            // Недоступная статистика не должна ничем мешать просмотру
+            Log.d(TAG, "TorrServer stats unavailable: ${e.message}")
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private val torrHeaders: Map<String, String> by lazy {
+        intent.getStringArrayExtra(Extras.HEADERS).toHeaderMap()
+    }
+
+    private fun formatTorrStats(t: JSONObject): String {
+        val preloaded = t.optDouble("preloaded_bytes", 0.0)
+        val speed = t.optDouble("download_speed", 0.0)
+        val active = t.optInt("active_peers", 0)
+        val total = t.optInt("total_peers", 0)
+        val seeders = t.optInt("connected_seeders", 0)
+        val sb = StringBuilder("TorrServer: ")
+            .append(formatSize(preloaded))
+            .append(" | скорость: ").append(formatSpeed(speed))
+        if (active > 0) sb.append(" | пиры: ").append(active).append(" / ").append(total)
+            .append(" - ").append(seeders)
+        return sb.toString()
+    }
+
+    /** Как formatSize в вебе: двоичные единицы, один знак после точки (у GB — два). */
+    private fun formatSize(bytes: Double): String = when {
+        bytes <= 0 -> "0 B"
+        bytes < 1024 -> String.format(Locale.US, "%.0f B", bytes)
+        bytes < 1024.0 * 1024 -> String.format(Locale.US, "%.1f KB", bytes / 1024)
+        bytes < 1024.0 * 1024 * 1024 -> String.format(Locale.US, "%.1f MB", bytes / (1024 * 1024))
+        else -> String.format(Locale.US, "%.2f GB", bytes / (1024.0 * 1024 * 1024))
+    }
+
+    /** Как formatSpeed в вебе: байты/с → мегабиты/с, меньше мегабита — килобиты. */
+    private fun formatSpeed(bytesPerSecond: Double): String {
+        if (bytesPerSecond <= 0) return "0 Mb/s"
+        val megabits = bytesPerSecond * 8 / 1_000_000
+        return if (megabits < 1) String.format(Locale.US, "%.1f Kb/s", bytesPerSecond * 8 / 1000)
+        else String.format(Locale.US, "%.1f Mb/s", megabits)
+    }
+
+    // endregion
+
     // region player
 
     private fun initPlayer() {
@@ -1709,6 +1842,7 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         handler.removeCallbacksAndMessages(null)
+        stopTorrStats()
         snapshotPosition()
         deliverResult()
         releasePlayer()

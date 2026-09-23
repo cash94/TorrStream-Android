@@ -50,17 +50,41 @@
         tools:ignore="HardcodedText"
         tools:text="23:47" />
 
-    <TextView
-        android:id="@+id/playerTitle"
+    <!-- Шапка HUD: заголовок и под ним статистика TorrServer — та же строка, что в веб-плеере
+         («TorrServer: … | скорость: … | пиры: …»). Показываются и прячутся вместе с панелью. -->
+    <LinearLayout
+        android:id="@+id/playerHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
         android:background="#99000000"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:padding="16dp"
-        android:textColor="@android:color/white"
-        android:textSize="18sp" />
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/playerTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@android:color/white"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/playerStats"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:alpha="0.8"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:visibility="gone"
+            tools:ignore="HardcodedText"
+            tools:text="TorrServer: 1.2 GB | скорость: 24.6 Mb/s | пиры: 12 / 48 - 7"
+            tools:visibility="visible" />
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/controlsPanel"
