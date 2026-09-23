@@ -63,7 +63,14 @@ jobs:
         run: |
           src=$(find app/build/outputs/apk/lite/release -name '*.apk' | head -n1)
           if [ -z "$src" ]; then echo "::error::APK не собрался"; exit 1; fi
-          ver=$(git describe --tags --dirty 2>/dev/null | sed 's/^v//' || echo 1.0.1)
+          # Версию берём из метаданных самой сборки — это ровно то, что попало
+          # в APK. Прежний вариант с git describe на репозитории без тегов давал
+          # пустую строку (|| echo не срабатывал: код возврата брался у sed),
+          # и файл назывался «TorrStream-.apk»
+          meta=app/build/outputs/apk/lite/release/output-metadata.json
+          ver=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['elements'][0]['versionName'])" "$meta" 2>/dev/null || true)
+          if [ -z "$ver" ]; then ver=$(git describe --tags --dirty 2>/dev/null | sed 's/^v//'); fi
+          if [ -z "$ver" ]; then ver=1.0.1; fi
           out="TorrStream-$ver.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
