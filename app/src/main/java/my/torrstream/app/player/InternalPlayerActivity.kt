@@ -120,7 +120,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val NEW_LINE = "\n"
         private const val SEPARATOR = "  \u00B7  "
 
-        private const val TIMECODE_SAVE_INTERVAL_MS = 30_000L
+        /** Как у веб-плеера (startTimecodeSaving): раз в 10 секунд. */
+        private const val TIMECODE_SAVE_INTERVAL_MS = 10_000L
         /** Below this the position isn't worth resuming from — matches the web player. */
         private const val TIMECODE_MIN_SEC = 5
         /** This close to the end, resuming would drop the viewer back into the credits. */
@@ -1047,7 +1048,7 @@ class InternalPlayerActivity : AppCompatActivity() {
     )
 
     /**
-     * Posts playback progress every 30 s.
+     * Posts playback progress every 10 s, like the web player.
      *
      * The exit path already reports through MainActivity's result contract, but that only fires
      * on a clean exit: a killed process, a crash or a lost battery took the whole session's
@@ -1126,7 +1127,10 @@ class InternalPlayerActivity : AppCompatActivity() {
             val body = JSONObject().apply {
                 put("clientId", clientId)
                 put("hash", snapshot.hash)
-                put("fileId", snapshot.fileId)
+                // Строкой, как шлёт веб: сервер проверяет тело схемой (timecodeSaveSchema,
+                // fileId: z.string()) и на число отвечал 400 «expected string, received
+                // number». Из-за этого ни одно периодическое сохранение отсюда не доходило.
+                put("fileId", snapshot.fileId.toString())
                 put("timecode", snapshot.timeSec)
                 put("duration", snapshot.durationSec)
             }.toString()
