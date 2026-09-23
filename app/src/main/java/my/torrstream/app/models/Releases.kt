@@ -2,6 +2,9 @@ package my.torrstream.app.models
 
 class Releases : ArrayList<Release>()
 
+/** Ответ assets_url: вложения релиза отдельным запросом (см. Updater.apkLink). */
+class Assets : ArrayList<Asset>()
+
 data class Release(
     val url: String,
     val assets_url: String,

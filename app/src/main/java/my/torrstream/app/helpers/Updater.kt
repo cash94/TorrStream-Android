@@ -13,6 +13,7 @@ import my.torrstream.app.App
 import my.torrstream.app.BuildConfig
 import my.torrstream.app.R
 import my.torrstream.app.helpers.Helpers.getJson
+import my.torrstream.app.models.Assets
 import my.torrstream.app.models.Release
 import my.torrstream.app.models.Releases
 import my.torrstream.app.net.TlsSocketFactory
@@ -118,6 +119,48 @@ object Updater {
         return HtmlCompat.fromHtml(ret.trim(), HtmlCompat.FROM_HTML_MODE_LEGACY)
     }
 
+    /** GET с тем же обхождением TLS, что и check(). null — не получилось. */
+    private fun fetchText(link: String): String? {
+        return try {
+            val url = URL(link)
+            val connection = if (link.startsWith("https"))
+                url.openConnection() as HttpsURLConnection?
+            else
+                url.openConnection() as HttpURLConnection?
+            connection?.connect()
+            val body = connection?.inputStream?.use {
+                it.bufferedReader(Charset.defaultCharset()).readText()
+            }
+            connection?.disconnect()
+            body
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * Ссылка на APK релиза.
+     *
+     * Список релизов GitHub отдаёт с пустым assets (проверено на этом
+     * репозитории: и в /releases, и по тегу), а сами вложения доступны только
+     * по assets_url. Прежний код брал ссылку из assets списка — и скачивать
+     * было нечего, обновление молча не устанавливалось.
+     */
+    private fun apkLink(rel: Release): String {
+        rel.assets.lastOrNull { it.browser_download_url.endsWith(".apk", true) }
+            ?.let { return it.browser_download_url }
+
+        val body = fetchText(rel.assets_url) ?: return ""
+        val assets = try {
+            getJson(body, Assets::class.java)
+        } catch (e: Exception) {
+            null
+        } ?: return ""
+        return assets.lastOrNull { it.browser_download_url.endsWith(".apk", true) }
+            ?.browser_download_url ?: ""
+    }
+
     private val download = Any()
 
     private fun downloadApk(file: File, onProgress: ((prc: Int) -> Unit)?) {
@@ -125,13 +168,7 @@ object Updater {
             newVersion?.let { rel ->
                 if (file.exists())
                     file.delete()
-                // Берём именно APK: в релизе рядом могут лежать и другие файлы
-                // (раньше бралось последнее вложение, каким бы оно ни было)
-                var link = ""
-                for (asset in rel.assets) {
-                    if (asset.browser_download_url.endsWith(".apk", true))
-                        link = asset.browser_download_url
-                }
+                val link = apkLink(rel)
                 if (link.isNotEmpty()) {
                     try {
                         val url = URL(link)
