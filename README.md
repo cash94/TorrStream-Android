@@ -55,11 +55,10 @@ JAVA_HOME=/path/to/jdk-11 ./gradlew assembleLiteRelease
 
 ### Варианты сборки
 
-| Флейвор | Отличие |
-|---|---|
-| `lite` | Встроенное автообновление включено |
-| `full` | Автообновление выключено |
-| `ruStore` | Без автообновления, преднастроенный адрес сервера, minSdk 24 |
+Вариант один — `lite`: `./gradlew assembleLiteRelease`. В нём включено автообновление
+через релизы этого репозитория (`app/src/main/java/my/torrstream/app/helpers/Updater.kt`)
+и задан адрес сервера по умолчанию `http://torrstream.online` — его можно сменить
+в настройках приложения.
 
 ### Подпись релиза
 
@@ -73,5 +72,25 @@ keyAlias=...
 keyPassword=...
 ```
 
-Вместо файла можно задать переменные окружения `KEYSTORE_PASSWORD`,
-`RELEASE_SIGN_KEY_ALIAS`, `RELEASE_SIGN_KEY_PASSWORD`.
+Вместо файла можно задать переменные окружения `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`,
+`RELEASE_SIGN_KEY_ALIAS`, `RELEASE_SIGN_KEY_PASSWORD` — так собирает GitHub Actions.
+
+### Сборка APK в GitHub Actions
+
+Workflow `.github/workflows/build-lite.yml` собирает подписанный `lite`-релиз. Запуск —
+вручную (Actions → Build lite APK → Run workflow) или пушем тега `v*`: по тегу APK
+дополнительно прикладывается к релизу, откуда его забирает автообновление.
+
+Ключ подписи хранится в секретах репозитория (Settings → Secrets and variables →
+Actions), они видны только владельцу и в лог не попадают:
+
+| Секрет | Значение |
+|---|---|
+| `KEYSTORE_BASE64` | файл ключа, закодированный base64 |
+| `KEYSTORE_PASSWORD` | пароль хранилища |
+| `RELEASE_SIGN_KEY_ALIAS` | алиас ключа |
+| `RELEASE_SIGN_KEY_PASSWORD` | пароль ключа |
+
+Версия берётся из git: `versionName` — последний тег (`git describe --tags`),
+`versionCode` — число коммитов в `origin/main`. Без тегов используется запасное
+значение `1.0.1`, поэтому релизы нужно помечать тегами вида `v1.0.2`.

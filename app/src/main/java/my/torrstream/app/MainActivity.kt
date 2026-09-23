@@ -1330,7 +1330,7 @@ class MainActivity : BaseActivity(),
         inputManager: InputMethodManager
     ) {
         input?.apply {
-            setText(LAMPA_URL.ifEmpty { "http://torrstream.hnar.online" })
+            setText(LAMPA_URL.ifEmpty { "http://torrstream.online" })
             if (msg.isNotEmpty()) {
                 tilt?.isErrorEnabled = true
                 tilt?.error = msg

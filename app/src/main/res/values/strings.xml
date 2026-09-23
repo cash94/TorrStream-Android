@@ -8,7 +8,7 @@
     <string name="keep_connection_disable">Disable keeping the socket open</string>
     <string name="no_torrent_activity_found">There is no application to open torrent links. Please, install TorrServe or any other App working with torrents.</string>
     <string name="no_launch_player">The selected player does not support playing this video</string>
-    <string name="invalid_url">Enter the correct website address, for example:\nhttp://torrstream.hnar.online</string>
+    <string name="invalid_url">Enter the correct website address, for example:\nhttp://torrstream.online</string>
     <string name="cancel">Cancel</string>
     <string name="save">Save</string>
     <string name="show_menu">Open menu</string>

@@ -6,7 +6,7 @@
     <string name="keep_connection_disable">Вимкнути утримання сокета</string>
     <string name="no_torrent_activity_found">Немає додатка для відкриття торрент-посилань. Встановіть TorrServe або будь-який інший додаток, що працює з торрентами.</string>
     <string name="no_launch_player">Обраний плеєр не підтримує відтворення цього відео</string>
-    <string name="invalid_url">Введіть правильну адресу сайту, наприклад:\nhttp://torrstream.hnar.online</string>
+    <string name="invalid_url">Введіть правильну адресу сайту, наприклад:\nhttp://torrstream.online</string>
     <string name="cancel">Скасувати</string>
     <string name="save">Зберегти</string>
     <string name="show_menu">Відкрити меню</string>

@@ -6,7 +6,7 @@
     <string name="keep_connection_disable">关闭保持 socket 打开</string>
     <string name="no_torrent_activity_found">​​没有应用程序可以打开 torrent 链接。请安装 TorrServe 或任何其他支持 torrent 的应用程序。</string>
     <string name="no_launch_player">所选播放器不支持该视频</string>
-    <string name="invalid_url">请输入一个有效的网址，例如：\nhttp://torrstream.hnar.online</string>
+    <string name="invalid_url">请输入一个有效的网址，例如：\nhttp://torrstream.online</string>
     <string name="cancel">取消</string>
     <string name="save">保存</string>
     <string name="show_menu">打开菜单</string>

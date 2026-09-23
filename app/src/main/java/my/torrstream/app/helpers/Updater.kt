@@ -28,9 +28,32 @@ import javax.net.ssl.SSLSocketFactory
 
 object Updater {
     private const val RELEASE_LINK =
-        "https://api.github.com/repos/lampa-app/LAMPA/releases"
+        "https://api.github.com/repos/cash94/TorrStream-Android/releases"
     private var releases: Releases? = null
     private var newVersion: Release? = null
+
+    /**
+     * Версия из тега («v1.0.2», «1.0.2-beta») числами: [1, 0, 2].
+     *
+     * Прежнее сравнение брало кусок до первой точки и кусок после неё как два
+     * числа — на версиях вида 1.0.1 это давало «0.1», а 1.0.10 превращалось в
+     * «0.10», то есть в то же самое 0.1, и обновление не предлагалось.
+     */
+    private fun versionParts(raw: String): List<Int> =
+        raw.trim().removePrefix("v").substringBefore('-').split('.')
+            .map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }
+
+    /** Версия тега строго больше текущей (BuildConfig.VERSION_NAME). */
+    private fun isNewerThanCurrent(tag: String): Boolean {
+        val candidate = versionParts(tag)
+        val current = versionParts(BuildConfig.VERSION_NAME)
+        for (i in 0 until maxOf(candidate.size, current.size)) {
+            val a = candidate.getOrElse(i) { 0 }
+            val b = current.getOrElse(i) { 0 }
+            if (a != b) return a > b
+        }
+        return false
+    }
 
     init {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
@@ -57,27 +80,7 @@ object Updater {
             releases = getJson(body, Releases::class.java)
             releases?.let {
                 it.forEach { rel ->
-                    val majorVersionDouble: Double = try {
-                        rel.tag_name.replace("v", "").substringBefore(".").toDouble()
-                    } catch (npe: NumberFormatException) {
-                        0.0
-                    }
-                    val lastVersionDouble: Double = try {
-                        rel.tag_name.replace("v", "").substringAfter(".").toDouble()
-                    } catch (npe: NumberFormatException) {
-                        0.0
-                    }
-                    val majorCurrVersionDouble: Double = try {
-                        BuildConfig.VERSION_NAME.substringBefore(".").toDouble()
-                    } catch (npe: NumberFormatException) {
-                        0.0
-                    }
-                    val currVersionDouble: Double = try {
-                        BuildConfig.VERSION_NAME.substringAfter(".").toDouble()
-                    } catch (npe: NumberFormatException) {
-                        0.0
-                    }
-                    if (majorVersionDouble >= majorCurrVersionDouble && majorVersionDouble < 2 && lastVersionDouble > currVersionDouble) {
+                    if (isNewerThanCurrent(rel.tag_name)) {
                         newVersion = rel
                         connection.disconnect()
                         return true
@@ -104,27 +107,7 @@ object Updater {
         var ret = ""
 
         releases?.forEach { rel ->
-            val majorVersionDouble: Double = try {
-                rel.tag_name.replace("v", "").substringBefore(".").toDouble()
-            } catch (npe: NumberFormatException) {
-                0.0
-            }
-            val lastVersionDouble: Double = try {
-                rel.tag_name.replace("v", "").substringAfter(".").toDouble()
-            } catch (npe: NumberFormatException) {
-                0.0
-            }
-            val majorCurrVersionDouble: Double = try {
-                BuildConfig.VERSION_NAME.substringBefore(".").toDouble()
-            } catch (npe: NumberFormatException) {
-                0.0
-            }
-            val currVersionDouble: Double = try {
-                BuildConfig.VERSION_NAME.substringAfter(".").toDouble()
-            } catch (npe: NumberFormatException) {
-                0.0
-            }
-            if (majorVersionDouble >= majorCurrVersionDouble && majorVersionDouble < 2 && lastVersionDouble > currVersionDouble) {
+            if (isNewerThanCurrent(rel.tag_name)) {
                 ret += "<font color='white'><b>${rel.tag_name}</b></font> <br>"
                 ret += "<i>${rel.body.replace("\r\n", "<br/>")}</i><br/><br/>"
             } else {
@@ -142,9 +125,12 @@ object Updater {
             newVersion?.let { rel ->
                 if (file.exists())
                     file.delete()
+                // Берём именно APK: в релизе рядом могут лежать и другие файлы
+                // (раньше бралось последнее вложение, каким бы оно ни было)
                 var link = ""
                 for (asset in rel.assets) {
-                    link = asset.browser_download_url
+                    if (asset.browser_download_url.endsWith(".apk", true))
+                        link = asset.browser_download_url
                 }
                 if (link.isNotEmpty()) {
                     try {
@@ -195,7 +181,7 @@ object Updater {
         newVersion?.let {
             val destination = File(
                 ctx.getExternalFilesDir(null),
-                "LAMPA.apk"
+                "TorrStream.apk"
             ).apply {
                 mkdirs()
                 deleteOnExit()

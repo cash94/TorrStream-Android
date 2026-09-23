@@ -28,7 +28,7 @@ def getVersionName = { ->
         return stdout.toString().trim().replaceFirst("^v", "")
     }
     catch (ignored) {
-        return '9.9.9'
+        return '1.0.1'
     }
 }
 
@@ -60,8 +60,12 @@ android {
                 storePassword "$keystoreProperties.storePassword"
                 keyAlias "$keystoreProperties.keyAlias"
                 keyPassword "$keystoreProperties.keyPassword"
-            } else {
-                //storeFile file(System.getenv('KEYSTORE_FILE'))
+            } else if (System.getenv('KEYSTORE_FILE')) {
+                // Сборка в CI: ключа в репозитории нет, он приезжает из секретов
+                // GitHub (.github/workflows/build-lite.yml). Раньше строка со
+                // storeFile была закомментирована, и подпись по переменным
+                // окружения не работала вовсе.
+                storeFile file(System.getenv('KEYSTORE_FILE'))
                 storePassword System.getenv('KEYSTORE_PASSWORD')
                 keyAlias System.getenv('RELEASE_SIGN_KEY_ALIAS')
                 keyPassword System.getenv('RELEASE_SIGN_KEY_PASSWORD')
@@ -96,19 +100,12 @@ android {
     flavorDimensions "default"
 
     productFlavors {
+        // Единственный вариант сборки: автообновление через релизы
+        // github.com/cash94/TorrStream-Android (helpers/Updater.kt) и
+        // преднастроенный адрес сервера — его можно сменить в настройках.
         lite {
             buildConfigField "boolean", "enableUpdate", "true"
-            buildConfigField "String", "defaultAppUrl", "\"\""
-        }
-        full {
-            buildConfigField "boolean", "enableUpdate", "false"
-            buildConfigField "String", "defaultAppUrl", "\"\""
-        }
-        ruStore {
-            versionNameSuffix "-RuStore"
-            minSdk 24 // minSdk RuStore.apk
-            buildConfigField "boolean", "enableUpdate", "false"
-            buildConfigField "String", "defaultAppUrl", "\"http://torrstream.hnar.online\""
+            buildConfigField "String", "defaultAppUrl", "\"http://torrstream.online\""
         }
     }
 
