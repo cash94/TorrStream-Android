@@ -403,8 +403,6 @@ fun Context.getAppInstaller(): String {
         "com.android.vending" -> "Google Play Store"
         "com.amazon.venezia" -> "Amazon AppStore"
         "com.huawei.appmarket" -> "Huawei AppGallery"
-        "ru.vk.store" -> "RuStore"
-        "ru.vk.store.tv" -> "RuStoreTV"
         "com.google.android.packageinstaller" -> "Package Installer"
         else -> installerPackageName ?: "Unknown"
     }
