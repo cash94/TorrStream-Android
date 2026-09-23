@@ -58,27 +58,39 @@ class UpdateActivity : BaseActivity() {
 //            }
 //        }
 
-        findViewById<ProgressBar>(R.id.pbUpdate).visibility = View.VISIBLE
-        lifecycleScope.launch(Dispatchers.IO) {
-            if (!Updater.check())
-                finish()
-        }
-        findViewById<ProgressBar>(R.id.pbUpdate).visibility = View.GONE
-
         findViewById<TextView>(R.id.tvUpdateTitle)?.text =
             String.format(getString(R.string.update_app_found), getString(R.string.app_name))
-
         findViewById<TextView>(R.id.tvCurrentVersion)?.text =
             ("${getString(R.string.update_cur_version)}: ${BuildConfig.VERSION_NAME}")
-        findViewById<TextView>(R.id.tvNewVersion)?.text =
-            ("${getString(R.string.update_new_version)}: ${Updater.getVersion()}")
-        findViewById<TextView>(R.id.tvOverview)?.text = Updater.getOverview()
+
+        // Новую версию показываем только после проверки. Раньше поля заполнялись сразу, а
+        // проверка шла параллельно и результат не перерисовывала: если экран открывался без
+        // данных в памяти (Android восстановил его после выгрузки процесса, или сразу после
+        // установки обновления), строка «Найдена новая версия» оставалась пустой.
+        val progress = findViewById<ProgressBar>(R.id.pbUpdate)
+        val btnUpdate = findViewById<Button>(R.id.btnUpdate)
+        progress.visibility = View.VISIBLE
+        btnUpdate?.isEnabled = false
+        lifecycleScope.launch {
+            val found = withContext(Dispatchers.IO) { Updater.check() }
+            progress.visibility = View.GONE
+            if (!found) {
+                // Обновления нет (уже стоит последняя версия) или сеть не ответила
+                finish()
+                return@launch
+            }
+            findViewById<TextView>(R.id.tvNewVersion)?.text =
+                ("${getString(R.string.update_new_version)}: ${Updater.getVersion()}")
+            findViewById<TextView>(R.id.tvOverview)?.text = Updater.getOverview()
+            btnUpdate?.isEnabled = true
+            btnUpdate?.requestFocus()
+        }
 
         findViewById<Button>(R.id.btnCancel)?.setOnClickListener {
             finish()
         }
 
-        findViewById<Button>(R.id.btnUpdate)?.setOnClickListener {
+        btnUpdate?.setOnClickListener {
             it.isEnabled = false
             lifecycleScope.launch(Dispatchers.IO) {
                 if (update())
