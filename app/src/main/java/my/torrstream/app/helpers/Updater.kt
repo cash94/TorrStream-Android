@@ -109,12 +109,14 @@ object Updater {
         var ret = ""
 
         releases?.forEach { rel ->
+            // body у релиза без описания приходит null — раньше здесь падал весь экран
+            val notes = rel.body.orEmpty().replace("\r\n", "<br/>").replace("\n", "<br/>")
             if (isNewerThanCurrent(rel.tag_name)) {
                 ret += "<font color='white'><b>${rel.tag_name}</b></font> <br>"
-                ret += "<i>${rel.body.replace("\r\n", "<br/>")}</i><br/><br/>"
+                ret += "<i>$notes</i><br/><br/>"
             } else {
                 ret += "${rel.tag_name}<br>"
-                ret += "<i>${rel.body.replace("\r\n", "<br/>")}</i><br/><br/>"
+                ret += "<i>$notes</i><br/><br/>"
             }
         }
         return HtmlCompat.fromHtml(ret.trim(), HtmlCompat.FROM_HTML_MODE_LEGACY)
@@ -149,7 +151,7 @@ object Updater {
      * было нечего, обновление молча не устанавливалось.
      */
     private fun apkLink(rel: Release): String {
-        rel.assets.lastOrNull { it.browser_download_url.endsWith(".apk", true) }
+        rel.assets.orEmpty().lastOrNull { it.browser_download_url.endsWith(".apk", true) }
             ?.let { return it.browser_download_url }
 
         val body = fetchText(rel.assets_url) ?: return ""

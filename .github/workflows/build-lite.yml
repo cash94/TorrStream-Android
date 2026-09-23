@@ -90,8 +90,21 @@ jobs:
           # а для долгого хранения есть релизы
           retention-days: 7
 
+      # Описание релиза — текст аннотированного тега. Релиз без описания GitHub
+      # отдаёт с "body": null, а приложение до 1.0.8 на этом падало в цикле
+      # (Updater.getOverview). Пустым описание не оставляем ни при каком теге.
+      - name: Release notes from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # checkout может подменить аннотированный тег лёгким — забираем оригинал
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          git tag -l --format='%(contents:body)' "${GITHUB_REF_NAME}" | sed '/^[[:space:]]*$/d' > release-notes.md
+          if [ ! -s release-notes.md ]; then echo "TorrStream ${GITHUB_REF_NAME#v}" > release-notes.md; fi
+          cat release-notes.md
+
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.apk.outputs.path }}
+          body_path: release-notes.md

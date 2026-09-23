@@ -5,12 +5,14 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -72,18 +74,28 @@ class UpdateActivity : BaseActivity() {
         progress.visibility = View.VISIBLE
         btnUpdate?.isEnabled = false
         lifecycleScope.launch {
-            val found = withContext(Dispatchers.IO) { Updater.check() }
-            progress.visibility = View.GONE
-            if (!found) {
-                // Обновления нет (уже стоит последняя версия) или сеть не ответила
+            // Любая ошибка разбора ответа GitHub — не повод ронять приложение: экран
+            // открывается при каждом запуске, и падение здесь зацикливалось
+            // (падение → перезапуск → снова проверка обновлений → снова падение).
+            try {
+                val found = withContext(Dispatchers.IO) { Updater.check() }
+                progress.visibility = View.GONE
+                if (!found) {
+                    // Обновления нет (уже стоит последняя версия) или сеть не ответила
+                    finish()
+                    return@launch
+                }
+                findViewById<TextView>(R.id.tvNewVersion)?.text =
+                    ("${getString(R.string.update_new_version)}: ${Updater.getVersion()}")
+                findViewById<TextView>(R.id.tvOverview)?.text = Updater.getOverview()
+                btnUpdate?.isEnabled = true
+                btnUpdate?.requestFocus()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("UpdateActivity", "Update screen failed", e)
                 finish()
-                return@launch
             }
-            findViewById<TextView>(R.id.tvNewVersion)?.text =
-                ("${getString(R.string.update_new_version)}: ${Updater.getVersion()}")
-            findViewById<TextView>(R.id.tvOverview)?.text = Updater.getOverview()
-            btnUpdate?.isEnabled = true
-            btnUpdate?.requestFocus()
         }
 
         findViewById<Button>(R.id.btnCancel)?.setOnClickListener {

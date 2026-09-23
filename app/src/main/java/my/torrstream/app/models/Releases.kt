@@ -5,6 +5,12 @@ class Releases : ArrayList<Release>()
 /** Ответ assets_url: вложения релиза отдельным запросом (см. Updater.apkLink). */
 class Assets : ArrayList<Asset>()
 
+/**
+ * Ответ GitHub API. Gson заполняет поля в обход проверок Kotlin, поэтому всё, что GitHub
+ * может отдать как null, обязано быть nullable: иначе null попадает в не-null поле и падает
+ * там, где его читают. Так и вышло с body — релизы, созданные сборкой без описания, приходят
+ * с "body": null, и экран обновления (Updater.getOverview) падал в цикле.
+ */
 data class Release(
     val url: String,
     val assets_url: String,
@@ -15,22 +21,22 @@ data class Release(
     val node_id: String,
     val tag_name: String,
     val target_commitish: String,
-    val name: String,
+    val name: String?,
     val draft: Boolean,
     val prerelease: Boolean,
     val created_at: String,
-    val published_at: String,
-    val assets: ArrayList<Asset>,
-    val tarball_url: String,
-    val zipball_url: String,
-    val body: String,
+    val published_at: String?,
+    val assets: ArrayList<Asset>?,
+    val tarball_url: String?,
+    val zipball_url: String?,
+    val body: String?,
 )
 
 data class Asset(
     val url: String,
     val id: Int,
     val node_id: String,
-    val name: String,
+    val name: String?,
     val label: String?,
     val uploader: Any?,
     val content_type: String,
