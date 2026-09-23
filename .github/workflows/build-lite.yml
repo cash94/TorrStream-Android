@@ -48,11 +48,15 @@ jobs:
           echo "KEYSTORE_FILE=$RUNNER_TEMP/signing/keystore.jks" >> "$GITHUB_ENV"
 
       - name: Build lite release
+        # chmod — страховка: gradlew коммитили с Windows, где флага
+        # «исполняемый» нет, и шаг падал с «./gradlew: Permission denied»
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleLiteRelease
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           RELEASE_SIGN_KEY_ALIAS: ${{ secrets.RELEASE_SIGN_KEY_ALIAS }}
           RELEASE_SIGN_KEY_PASSWORD: ${{ secrets.RELEASE_SIGN_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleLiteRelease
 
       - name: Name the APK by version
         id: apk
