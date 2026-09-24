@@ -98,7 +98,12 @@ jobs:
         run: |
           # checkout может подменить аннотированный тег лёгким — забираем оригинал
           git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
-          git tag -l --format='%(contents:body)' "${GITHUB_REF_NAME}" | sed '/^[[:space:]]*$/d' > release-notes.md
+          # Весь текст тега, а не только %(contents:body): body — это то, что после
+          # первой пустой строки, и сообщение без неё (v1.0.9) целиком уходило в
+          # subject, а релиз получал заглушку. Подпись подписанного тега отрезаем.
+          git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" \
+            | sed '/-----BEGIN PGP SIGNATURE-----/,$d' \
+            | sed '/^[[:space:]]*$/d' > release-notes.md
           if [ ! -s release-notes.md ]; then echo "TorrStream ${GITHUB_REF_NAME#v}" > release-notes.md; fi
           cat release-notes.md
 
