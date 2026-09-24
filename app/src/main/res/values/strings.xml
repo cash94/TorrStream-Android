@@ -46,8 +46,15 @@
     <string name="player_on">On</string>
     <string name="player_off">Off</string>
     <string name="player_buffer_mb">%1$d MB</string>
-    <string name="player_time_left">%1$s left · ends at %2$s</string>
-    <string name="player_buffer_fill">Buffer: %1$d%%</string>
+    <string name="player_hud_buffer">Buffer</string>
+    <string name="player_hud_left">Left</string>
+    <string name="player_hud_ends">Ends at</string>
+    <string name="player_hud_speed">Speed</string>
+    <string name="player_hud_peers">Peers</string>
+    <string name="player_hud_seeds">Seeds</string>
+    <string name="player_unit_sec">%1$d s</string>
+    <string name="player_unit_min">%1$d min</string>
+    <string name="player_unit_hour">%1$d h</string>
     <string name="player_clock_desc">Current time over the video</string>
     <string name="player_buffer_desc">How much is loaded ahead. More survives a shaky connection</string>
     <string name="player_decoder_desc">What decodes the video and audio</string>

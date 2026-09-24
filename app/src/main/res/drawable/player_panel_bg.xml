@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Scrim behind the controls so white icons stay readable over bright scenes. -->
+<!-- Затемнение под нижним ХУДом, как в веб-плеере (#controls-container::before): плотное у края
+     экрана и сходит на нет к середине, чтобы белые значки и строка буфера читались на светлых
+     сценах. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <gradient
-        android:angle="270"
-        android:endColor="#E6000000"
-        android:startColor="#00000000" />
+        android:angle="90"
+        android:centerColor="#99000000"
+        android:endColor="#00000000"
+        android:startColor="#E6000000" />
 </shape>

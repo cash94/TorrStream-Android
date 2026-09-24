@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Затемняющая полоса сверху, как в веб-плеере (.player-title::before): под заголовком и
+     статистикой TorrServer, во всю ширину, без «таблетки». -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:centerColor="#8C000000"
+        android:endColor="#00000000"
+        android:startColor="#E0000000" />
+</shape>

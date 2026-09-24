@@ -44,8 +44,15 @@
     <string name="player_on">Вкл</string>
     <string name="player_off">Выкл</string>
     <string name="player_buffer_mb">%1$d МБ</string>
-    <string name="player_time_left">Осталось %1$s · конец в %2$s</string>
-    <string name="player_buffer_fill">Буфер: %1$d%%</string>
+    <string name="player_hud_buffer">Буфер</string>
+    <string name="player_hud_left">До конца</string>
+    <string name="player_hud_ends">Конец в</string>
+    <string name="player_hud_speed">Скорость</string>
+    <string name="player_hud_peers">Пиры</string>
+    <string name="player_hud_seeds">Сиды</string>
+    <string name="player_unit_sec">%1$d сек</string>
+    <string name="player_unit_min">%1$d мин</string>
+    <string name="player_unit_hour">%1$d ч</string>
     <string name="player_clock_desc">Текущее время поверх видео</string>
     <string name="player_buffer_desc">Сколько загружать наперёд. Больше — устойчивее к обрывам связи</string>
     <string name="player_decoder_desc">Чем декодировать видео и звук</string>

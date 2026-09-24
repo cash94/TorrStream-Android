@@ -1,6 +1,7 @@
 package my.torrstream.app.player
 
 import android.app.Activity
+import android.graphics.Typeface
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -47,6 +48,7 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -118,7 +120,26 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val SCREEN_SAVER_DELAY_MS = 15_000L
         private const val SCREEN_SAVER_DIM = 0.75f
         private const val NEW_LINE = "\n"
-        private const val SEPARATOR = "  \u00B7  "
+
+        /**
+         * ХУД в стиле веб-плеера (hudStat в public/js/player.js): подпись капсом, мельче и
+         * приглушённее значения, пары разделены тонкой чертой.
+         */
+        private const val HUD_LABEL_SIZE = 0.72f
+        private const val HUD_LABEL_COLOR = 0x99FFFFFF.toInt()
+        private const val HUD_DIVIDER = "\u2003|\u2003"
+        private const val HUD_DIVIDER_COLOR = 0x47FFFFFF
+        private const val HUD_VALUE_COLOR = 0xFFFFFFFF.toInt()
+        /** Запас буфера: красный — вот-вот встанет, жёлтый — впритык, зелёный — с запасом. */
+        private const val HUD_LOW_COLOR = 0xFFFF8A80.toInt()
+        private const val HUD_MID_COLOR = 0xFFFFD166.toInt()
+        private const val HUD_OK_COLOR = 0xFF7EE2A8.toInt()
+        private const val BUFFER_LOW_SEC = 10L
+        private const val BUFFER_MID_SEC = 20L
+        /** Появление и угасание ХУДа — как opacity 0.3s у веб-плеера. */
+        private const val HUD_FADE_MS = 250L
+        private const val CLOCK_ALPHA_HUD = 0.9f
+        private const val CLOCK_ALPHA_IDLE = 0.55f
 
         /** Как у веб-плеера (startTimecodeSaving): раз в 10 секунд. */
         private const val TIMECODE_SAVE_INTERVAL_MS = 10_000L
@@ -184,8 +205,6 @@ class InternalPlayerActivity : AppCompatActivity() {
     private lateinit var remainingText: TextView
     private lateinit var dimOverlay: View
 
-    /** Kept so the status line can report how full the buffer actually is. */
-    private var loadControl: DefaultLoadControl? = null
     private var screenSaverOn = false
 
     /**
@@ -602,34 +621,93 @@ class InternalPlayerActivity : AppCompatActivity() {
         clockView.text = android.text.format.DateFormat.getTimeFormat(this).format(Date())
     }
 
+    /** Последняя отрисованная строка буфера — чтобы не перекладывать текст на каждом тике. */
+    private var lastStatusKey: String? = null
+
     /**
-     * "1:23:45 left · ends at 23:47" — the wall-clock finish is the part people actually plan
-     * around, and working it out from a remaining-time readout is a chore.
+     * «БУФЕР 25 сек | ДО КОНЦА 46 мин 49 сек | КОНЕЦ В 23:47» — как строка буфера веб-плеера.
+     * Буфер — сколько секунд видео загружено впереди позиции: столько и продержится показ,
+     * если сеть пропадёт, поэтому значение окрашено по уровню. Время окончания — то, по чему
+     * реально планируют вечер, высчитывать его из «осталось» неудобно.
      */
     private fun updateStatusLine(positionMs: Long, durationMs: Long) {
-        val parts = mutableListOf(getString(R.string.player_buffer_fill, bufferFillPercent()))
+        val p = player ?: return
+        val aheadSec = ((p.bufferedPosition - positionMs) / 1000L).coerceAtLeast(0L)
+        val stats = mutableListOf(
+            HudStat(getString(R.string.player_hud_buffer), formatBufferAhead(aheadSec), bufferColor(aheadSec)),
+        )
         if (durationMs > 0) {
             val leftMs = (durationMs - positionMs).coerceAtLeast(0L)
             val endsAt = Date(System.currentTimeMillis() + leftMs)
-            parts += getString(
-                R.string.player_time_left,
-                formatTime(leftMs),
+            stats += HudStat(getString(R.string.player_hud_left), formatDurationWords(leftMs / 1000L))
+            stats += HudStat(
+                getString(R.string.player_hud_ends),
                 android.text.format.DateFormat.getTimeFormat(this).format(endsAt),
             )
         }
-        remainingText.text = parts.joinToString(SEPARATOR)
+        val key = stats.joinToString("|") { it.value + it.color }
+        if (key == lastStatusKey) return
+        lastStatusKey = key
+        remainingText.text = hudLine(stats)
     }
 
-    /**
-     * How full the buffer is, against the size chosen in settings. Taken from the allocator's own
-     * byte count rather than ExoPlayer's bufferedPercentage, which measures progress through the
-     * whole file and would sit near zero for an entire film.
-     */
-    private fun bufferFillPercent(): Int {
-        val target = playerBufferMb * 1024L * 1024L
-        val allocated = loadControl?.allocator?.totalBytesAllocated?.toLong() ?: return 0
-        if (target <= 0L) return 0
-        return ((allocated * 100L) / target).toInt().coerceIn(0, 100)
+    private data class HudStat(val label: String, val value: String, val color: Int = HUD_VALUE_COLOR)
+
+    /** Пары «подпись значение» через тонкую черту — вид строк ХУДа веб-плеера. */
+    private fun hudLine(stats: List<HudStat>): CharSequence {
+        val sb = SpannableStringBuilder()
+        stats.forEachIndexed { i, stat ->
+            if (i > 0) {
+                val from = sb.length
+                sb.append(HUD_DIVIDER)
+                sb.setSpan(ForegroundColorSpan(HUD_DIVIDER_COLOR), from, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            var from = sb.length
+            sb.append(stat.label.uppercase(Locale.getDefault()))
+            sb.setSpan(RelativeSizeSpan(HUD_LABEL_SIZE), from, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.setSpan(ForegroundColorSpan(HUD_LABEL_COLOR), from, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.setSpan(StyleSpan(Typeface.BOLD), from, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            // Полукруглая шпация — зазор между подписью и значением, как 0.45em в вебе
+            sb.append('\u2002')
+            from = sb.length
+            sb.append(stat.value)
+            sb.setSpan(ForegroundColorSpan(stat.color), from, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.setSpan(StyleSpan(Typeface.BOLD), from, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        return sb
+    }
+
+    private fun bufferColor(aheadSec: Long) = when {
+        aheadSec < BUFFER_LOW_SEC -> HUD_LOW_COLOR
+        aheadSec < BUFFER_MID_SEC -> HUD_MID_COLOR
+        else -> HUD_OK_COLOR
+    }
+
+    /** Как в вебе: до минуты — секунды, до часа — минуты, дальше — часы. */
+    private fun formatBufferAhead(sec: Long): String = when {
+        sec < 60 -> getString(R.string.player_unit_sec, sec.toInt())
+        sec < 3600 -> getString(R.string.player_unit_min, (sec / 60).toInt())
+        else -> getString(R.string.player_unit_hour, (sec / 3600).toInt())
+    }
+
+    /** «1 ч 23 мин», «46 мин 49 сек», «12 сек» — как «До конца» в веб-плеере. */
+    private fun formatDurationWords(sec: Long): String {
+        val h = (sec / 3600).toInt()
+        val m = ((sec % 3600) / 60).toInt()
+        val s = (sec % 60).toInt()
+        val parts = mutableListOf<String>()
+        when {
+            h > 0 -> {
+                parts += getString(R.string.player_unit_hour, h)
+                if (m > 0) parts += getString(R.string.player_unit_min, m)
+            }
+            m > 0 -> {
+                parts += getString(R.string.player_unit_min, m)
+                if (s > 0) parts += getString(R.string.player_unit_sec, s)
+            }
+            else -> parts += getString(R.string.player_unit_sec, s)
+        }
+        return parts.joinToString(" ")
     }
 
     // endregion
@@ -764,10 +842,19 @@ class InternalPlayerActivity : AppCompatActivity() {
         if (player?.isPlaying == true) handler.postDelayed(hideControls, CONTROLS_TIMEOUT_MS)
     }
 
+    /**
+     * Показан ли ХУД по смыслу. Не visibility панели: пока она гаснет, она ещё VISIBLE, а
+     * нажатие в это время должно будить ХУД, а не срабатывать на гаснущих кнопках.
+     */
+    private var hudShown = true
+
     private fun setControlsVisible(visible: Boolean) {
-        val wasVisible = controlsPanel.visibility == View.VISIBLE
-        controlsPanel.visibility = if (visible) View.VISIBLE else View.GONE
-        headerView.visibility = if (visible) View.VISIBLE else View.GONE
+        val wasVisible = hudShown
+        hudShown = visible
+        fadeHud(controlsPanel, visible)
+        fadeHud(headerView, visible)
+        clockView.animate().alpha(if (visible) CLOCK_ALPHA_HUD else CLOCK_ALPHA_IDLE)
+            .setDuration(HUD_FADE_MS).start()
         // Статистику TorrServer опрашиваем, только пока её видно
         if (visible) startTorrStats() else stopTorrStats()
         // The read-out belongs to the seek bar; without the bar there is nothing to read.
@@ -783,7 +870,23 @@ class InternalPlayerActivity : AppCompatActivity() {
     }
 
     private val controlsVisible: Boolean
-        get() = controlsPanel.visibility == View.VISIBLE
+        get() = hudShown
+
+    /** Плавное появление и угасание, как у веб-плеера; когда угасание закончилось — GONE. */
+    private fun fadeHud(view: View, visible: Boolean) {
+        view.animate().cancel()
+        if (visible) {
+            if (view.visibility != View.VISIBLE) {
+                view.alpha = 0f
+                view.visibility = View.VISIBLE
+            }
+            view.animate().alpha(1f).setDuration(HUD_FADE_MS).start()
+        } else if (view.visibility == View.VISIBLE) {
+            view.animate().alpha(0f).setDuration(HUD_FADE_MS)
+                .withEndAction { if (!hudShown) view.visibility = View.GONE }
+                .start()
+        }
+    }
 
     /**
      * Remote navigation, as specified: the button row runs left to right, "up" from it lands on
@@ -1374,7 +1477,7 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     /**
      * Строка под заголовком — та же, что в веб-плеере (public/js/torrserverstats.js и
-     * player.js): «TorrServer: 1.2 GB | скорость: 24.6 Mb/s | пиры: 12 / 48 - 7».
+     * player.js): «TORRSERVER 1.2 GB | СКОРОСТЬ 24.6 Mb/s | ПИРЫ 12 / 48 | СИДЫ 7».
      *
      * Данные — POST <TorrServer>/cache {action: get, hash}. Адрес TorrServer и хэш берутся из
      * ссылки текущего элемента (<ts>/stream?link=<hash>&index=<n>), поэтому на следующей серии
@@ -1391,9 +1494,9 @@ class InternalPlayerActivity : AppCompatActivity() {
                     statsView.visibility = View.GONE
                     break
                 }
-                val text = withContext(Dispatchers.IO) { loadTorrStats(target.first, target.second) }
-                if (text != null) {
-                    statsView.text = text
+                val stats = withContext(Dispatchers.IO) { loadTorrStats(target.first, target.second) }
+                if (stats != null) {
+                    statsView.text = hudLine(stats)
                     statsView.visibility = View.VISIBLE
                 }
                 delay(STATS_INTERVAL_MS)
@@ -1429,7 +1532,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         return null
     }
 
-    private fun loadTorrStats(base: String, hash: String): String? {
+    private fun loadTorrStats(base: String, hash: String): List<HudStat>? {
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL("$base/cache").openConnection() as HttpURLConnection).apply {
@@ -1461,18 +1564,21 @@ class InternalPlayerActivity : AppCompatActivity() {
         intent.getStringArrayExtra(Extras.HEADERS).toHeaderMap()
     }
 
-    private fun formatTorrStats(t: JSONObject): String {
+    private fun formatTorrStats(t: JSONObject): List<HudStat> {
         val preloaded = t.optDouble("preloaded_bytes", 0.0)
         val speed = t.optDouble("download_speed", 0.0)
         val active = t.optInt("active_peers", 0)
         val total = t.optInt("total_peers", 0)
         val seeders = t.optInt("connected_seeders", 0)
-        val sb = StringBuilder("TorrServer: ")
-            .append(formatSize(preloaded))
-            .append(" | скорость: ").append(formatSpeed(speed))
-        if (active > 0) sb.append(" | пиры: ").append(active).append(" / ").append(total)
-            .append(" - ").append(seeders)
-        return sb.toString()
+        val stats = mutableListOf(
+            HudStat("TorrServer", formatSize(preloaded)),
+            HudStat(getString(R.string.player_hud_speed), formatSpeed(speed)),
+        )
+        if (active > 0) {
+            stats += HudStat(getString(R.string.player_hud_peers), "$active / $total")
+            stats += HudStat(getString(R.string.player_hud_seeds), seeders.toString())
+        }
+        return stats
     }
 
     /** Как formatSize в вебе: двоичные единицы, один знак после точки (у GB — два). */
@@ -1517,7 +1623,6 @@ class InternalPlayerActivity : AppCompatActivity() {
                 DefaultLoadControl.Builder()
                     .setTargetBufferBytes(playerBufferMb * 1024 * 1024)
                     .build()
-                    .also { loadControl = it }
             )
             .build()
 

@@ -44,8 +44,15 @@
     <string name="player_on">开</string>
     <string name="player_off">关</string>
     <string name="player_buffer_mb">%1$d MB</string>
-    <string name="player_time_left">剩余 %1$s · %2$s 结束</string>
-    <string name="player_buffer_fill">缓冲：%1$d%%</string>
+    <string name="player_hud_buffer">缓冲</string>
+    <string name="player_hud_left">剩余</string>
+    <string name="player_hud_ends">结束于</string>
+    <string name="player_hud_speed">速度</string>
+    <string name="player_hud_peers">节点</string>
+    <string name="player_hud_seeds">做种</string>
+    <string name="player_unit_sec">%1$d 秒</string>
+    <string name="player_unit_min">%1$d 分</string>
+    <string name="player_unit_hour">%1$d 小时</string>
     <string name="player_clock_desc">在视频上方显示当前时间</string>
     <string name="player_buffer_desc">预加载多少内容。越多越能抵抗网络中断</string>
     <string name="player_decoder_desc">用什么解码视频和音频</string>

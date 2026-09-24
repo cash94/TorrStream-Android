@@ -30,36 +30,21 @@
         android:indeterminate="true"
         android:visibility="gone" />
 
-    <!-- Часы поверх картинки. Живут отдельно от панели управления: они должны быть видны и
-         когда HUD скрыт, поэтому приглушены прозрачностью, чтобы не тянуть на себя взгляд. -->
-    <TextView
-        android:id="@+id/playerClock"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:layout_marginTop="16dp"
-        android:layout_marginEnd="20dp"
-        android:alpha="0.55"
-        android:shadowColor="#000000"
-        android:shadowDx="0"
-        android:shadowDy="0"
-        android:shadowRadius="6"
-        android:textColor="@android:color/white"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        tools:ignore="HardcodedText"
-        tools:text="23:47" />
-
-    <!-- Шапка HUD: заголовок и под ним статистика TorrServer — та же строка, что в веб-плеере
-         («TorrServer: … | скорость: … | пиры: …»). Показываются и прячутся вместе с панелью. -->
+    <!-- Шапка HUD в стиле веб-плеера: затемняющая полоса во всю ширину, крупный заголовок и
+         под ним статистика TorrServer подписанными парами («TORRSERVER 1.2 GB | СКОРОСТЬ …»).
+         Нижний отступ большой, чтобы затемнение сходило на нет ниже текста, а не обрывалось
+         под ним. Справа — место под часы. Показывается и прячется вместе с панелью. -->
     <LinearLayout
         android:id="@+id/playerHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:background="#99000000"
+        android:background="@drawable/player_top_scrim"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingStart="32dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="110dp"
+        android:paddingBottom="48dp">
 
         <TextView
             android:id="@+id/playerTitle"
@@ -67,24 +52,52 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
+            android:shadowColor="#99000000"
+            android:shadowDy="2"
+            android:shadowRadius="10"
             android:textColor="@android:color/white"
-            android:textSize="18sp" />
+            android:textSize="20sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/playerStats"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:alpha="0.8"
+            android:layout_marginTop="6dp"
             android:ellipsize="end"
+            android:fontFeatureSettings="tnum"
             android:maxLines="1"
+            android:shadowColor="#B3000000"
+            android:shadowDy="1"
+            android:shadowRadius="6"
             android:textColor="@android:color/white"
             android:textSize="14sp"
             android:visibility="gone"
             tools:ignore="HardcodedText"
-            tools:text="TorrServer: 1.2 GB | скорость: 24.6 Mb/s | пиры: 12 / 48 - 7"
+            tools:text="TORRSERVER 1.2 GB  |  СКОРОСТЬ 24.6 Mb/s  |  ПИРЫ 12 / 48  |  СИДЫ 7"
             tools:visibility="visible" />
     </LinearLayout>
+
+    <!-- Часы в правом углу шапки. Объявлены после неё, чтобы затемнение шапки не ложилось
+         поверх. Видны и при скрытом HUD, но тогда приглушены (alpha из кода), чтобы не тянуть
+         на себя взгляд; с HUD — ярче, как в веб-плеере. -->
+    <TextView
+        android:id="@+id/playerClock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="24dp"
+        android:alpha="0.55"
+        android:fontFeatureSettings="tnum"
+        android:shadowColor="#99000000"
+        android:shadowDy="2"
+        android:shadowRadius="10"
+        android:textColor="@android:color/white"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        tools:ignore="HardcodedText"
+        tools:text="23:47" />
 
     <LinearLayout
         android:id="@+id/controlsPanel"
@@ -93,10 +106,28 @@
         android:layout_gravity="bottom"
         android:background="@drawable/player_panel_bg"
         android:orientation="vertical"
-        android:paddingStart="24dp"
-        android:paddingTop="40dp"
-        android:paddingEnd="24dp"
+        android:paddingStart="32dp"
+        android:paddingTop="48dp"
+        android:paddingEnd="32dp"
         android:paddingBottom="16dp">
+
+        <!-- Строка буфера, как в веб-плеере: «БУФЕР 25 сек | ДО КОНЦА 46 мин | КОНЕЦ В 14:04»,
+             у левого края над временем. Запас буфера окрашен по уровню (см. updateStatusLine). -->
+        <TextView
+            android:id="@+id/remainingText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:ellipsize="end"
+            android:fontFeatureSettings="tnum"
+            android:maxLines="1"
+            android:shadowColor="#B3000000"
+            android:shadowDy="1"
+            android:shadowRadius="6"
+            android:textColor="@android:color/white"
+            android:textSize="15sp"
+            tools:ignore="HardcodedText"
+            tools:text="БУФЕР 25 сек  |  ДО КОНЦА 46 мин 49 сек  |  КОНЕЦ В 14:04" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -108,10 +139,11 @@
                 android:id="@+id/positionText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:fontFeatureSettings="tnum"
                 android:minWidth="64dp"
                 android:text="00:00"
                 android:textColor="@android:color/white"
-                android:textSize="14sp" />
+                android:textSize="15sp" />
 
             <SeekBar
                 android:id="@+id/seekBar"
@@ -130,23 +162,12 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:gravity="end"
+                android:fontFeatureSettings="tnum"
                 android:minWidth="64dp"
                 android:text="00:00"
                 android:textColor="@android:color/white"
-                android:textSize="14sp" />
+                android:textSize="15sp" />
         </LinearLayout>
-
-        <!-- Сколько осталось и во сколько закончится -->
-        <TextView
-            android:id="@+id/remainingText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:gravity="center"
-            android:textColor="#B3FFFFFF"
-            android:textSize="13sp"
-            tools:ignore="HardcodedText"
-            tools:text="Буфер: 87% · Осталось 1:23:45 · конец в 23:47" />
 
         <LinearLayout
             android:id="@+id/buttonsRow"
