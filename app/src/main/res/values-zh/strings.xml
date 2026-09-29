@@ -61,6 +61,13 @@
     <string name="player_decoder_software_desc">优先软件解码。对 AVI (DivX/Xvid) 有帮助，占用处理器</string>
     <string name="player_playback_failed">无法播放：%1$s</string>
     <string name="player_decoder">解码器</string>
+    <string name="player_engine">引擎</string>
+    <string name="player_engine_desc">播放视频所用引擎：ExoPlayer 或内置 VLC</string>
+    <string name="player_engine_auto">自动</string>
+    <string name="player_engine_auto_desc">使用 ExoPlayer；无法解码的文件（XviD/DivX 的 AVI、WMV 等）切换到 VLC</string>
+    <string name="player_engine_vlc">始终使用 VLC</string>
+    <string name="player_engine_vlc_desc">自带 FFmpeg 解码器支持任意格式；不支持 HDMI 直通 AC3/DTS</string>
+    <string name="player_switching_vlc">设备无法解码此文件 - 切换到 VLC</string>
     <string name="player_decoder_combined">混合</string>
     <string name="player_decoder_hardware">硬件</string>
     <string name="player_decoder_software">软件</string>

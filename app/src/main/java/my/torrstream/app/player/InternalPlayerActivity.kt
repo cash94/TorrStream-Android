@@ -65,6 +65,7 @@ import my.torrstream.app.R
 import my.torrstream.app.helpers.Prefs
 import my.torrstream.app.helpers.Prefs.playerBufferMb
 import my.torrstream.app.helpers.Prefs.playerDecoderMode
+import my.torrstream.app.helpers.Prefs.playerEngine
 import my.torrstream.app.helpers.Prefs.playerShowClock
 // Non-transitive R classes are on, so media3's own drawables are not merged into our R.
 import androidx.media3.ui.R as Media3R
@@ -168,6 +169,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val SEEK_BAR_STEPS = 1000
         private const val DIMMED_ALPHA = 0.35f
 
+        private val MPEG4_PART2_MIMES = setOf(MimeTypes.VIDEO_MP4V, MimeTypes.VIDEO_DIVX, MimeTypes.VIDEO_H263)
+
         private val RESIZE_MODES = intArrayOf(
             AspectRatioFrameLayout.RESIZE_MODE_FIT,
             AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
@@ -175,9 +178,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         )
     }
 
-    private var player: ExoPlayer? = null
-    private var trackSelector: DefaultTrackSelector? = null
-    private var audioDisabledAfterError = false
+    /** ExoPlayer, а для того, что он не может декодировать, — libVLC ([VlcPlayer]). */
+    private var player: Player? = null
 
     private lateinit var playerView: PlayerView
     private lateinit var progressBar: ProgressBar
@@ -213,6 +215,13 @@ class InternalPlayerActivity : AppCompatActivity() {
      */
     private var softwareVideoFallback = false
     private var videoFallbackTried = false
+
+    /**
+     * Играет ли сейчас libVLC. Включается настройкой «Движок» или сам, когда ExoPlayer не
+     * смог декодировать файл: как и программный декодер, спасает этот файл, в настройки
+     * не пишется.
+     */
+    private var usingVlc = false
 
     /** Set when the player is rebuilt (buffer change) so playback resumes where it left off. */
     private var resumeIndex: Int? = null
@@ -266,6 +275,7 @@ class InternalPlayerActivity : AppCompatActivity() {
     private var resultDelivered = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        usingVlc = playerEngine == Prefs.ENGINE_VLC
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_internal_player)
@@ -504,6 +514,11 @@ class InternalPlayerActivity : AppCompatActivity() {
                         getString(decoderLabelRes(playerDecoderMode)),
                 R.string.player_decoder_desc,
             ),
+            withDescription(
+                "${getString(R.string.player_engine)}: " +
+                        getString(engineLabelRes(playerEngine)),
+                R.string.player_engine_desc,
+            ),
         )
         val actions = listOf<() -> Unit>(
             {
@@ -514,6 +529,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             },
             { showBufferPanel() },
             { showDecoderPanel() },
+            { showEnginePanel() },
         )
         showSidePanel(
             titleRes = R.string.player_settings,
@@ -576,6 +592,46 @@ class InternalPlayerActivity : AppCompatActivity() {
             opener = btnSettings,
             itemLayout = R.layout.item_side_panel_desc,
         )
+    }
+
+    private fun engineLabelRes(engine: Int) = when (engine) {
+        Prefs.ENGINE_VLC -> R.string.player_engine_vlc
+        else -> R.string.player_engine_auto
+    }
+
+    private fun showEnginePanel() {
+        val engines = listOf(Prefs.ENGINE_AUTO, Prefs.ENGINE_VLC)
+        showSidePanel(
+            titleRes = R.string.player_engine,
+            labels = engines.map {
+                withDescription(
+                    getString(engineLabelRes(it)),
+                    if (it == Prefs.ENGINE_VLC) R.string.player_engine_vlc_desc
+                    else R.string.player_engine_auto_desc,
+                )
+            },
+            checkedIndex = engines.indexOf(playerEngine),
+            actions = engines.map { engine -> { applyEngine(engine) } },
+            opener = btnSettings,
+            itemLayout = R.layout.item_side_panel_desc,
+        )
+    }
+
+    private fun applyEngine(engine: Int) {
+        if (engine == playerEngine) return
+        playerEngine = engine
+        usingVlc = engine == Prefs.ENGINE_VLC
+        restartPlayer("engine $engine")
+    }
+
+    /** ExoPlayer не справился с файлом — пересобираем плеер на libVLC с той же позиции. */
+    private fun switchToVlc(reason: String) {
+        if (usingVlc) return
+        usingVlc = true
+        Log.w(TAG, "Switching to libVLC: $reason")
+        App.toast(R.string.player_switching_vlc, true)
+        // Posted: зовётся из колбэков самого плеера
+        handler.post { restartPlayer("libVLC fallback") }
     }
 
     private fun applyDecoderMode(mode: Int) {
@@ -1367,7 +1423,6 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private fun showTrackDialog(trackType: @C.TrackType Int) {
         val p = player ?: return
-        val selector = trackSelector ?: return
         val groups = p.currentTracks.groups.filter { it.type == trackType && it.isSupported }
 
         val labels = mutableListOf<String>()
@@ -1376,11 +1431,11 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         // Subtitles can be turned off entirely; an audio track cannot.
         if (trackType == C.TRACK_TYPE_TEXT) {
-            val textDisabled = selector.parameters.getRendererDisabled(C.TRACK_TYPE_TEXT) ||
+            val textDisabled = C.TRACK_TYPE_TEXT in p.trackSelectionParameters.disabledTrackTypes ||
                     groups.none { group -> (0 until group.length).any { group.isTrackSelected(it) } }
             labels += getString(R.string.player_subtitles_off)
             actions += {
-                selector.parameters = selector.buildUponParameters()
+                p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                     .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                     .build()
@@ -1395,7 +1450,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 labels += describeTrack(group, i, labels.size)
                 val mediaGroup = group.mediaTrackGroup
                 actions += {
-                    selector.parameters = selector.buildUponParameters()
+                    p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                         .setTrackTypeDisabled(trackType, false)
                         .setOverrideForType(TrackSelectionOverride(mediaGroup, i))
                         .build()
@@ -1604,32 +1659,12 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private fun initPlayer() {
         val headers = intent.getStringArrayExtra(Extras.HEADERS).toHeaderMap()
+        val newPlayer = if (usingVlc) buildVlcPlayer(headers) else buildExoPlayer(headers)
 
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setAllowCrossProtocolRedirects(true)
-            .apply { if (headers.isNotEmpty()) setDefaultRequestProperties(headers) }
-
-        val exoPlayer = ExoPlayer.Builder(
-            this,
-            buildRenderersFactory()
-        )
-            .setTrackSelector(DefaultTrackSelector(this).also { trackSelector = it })
-            .setMediaSourceFactory(
-                DefaultMediaSourceFactory(DefaultDataSource.Factory(this, httpFactory))
-            )
-            // How much of the stream is held in memory. LoadControl is fixed at build time, so
-            // changing this setting rebuilds the player (see applyBufferSize).
-            .setLoadControl(
-                DefaultLoadControl.Builder()
-                    .setTargetBufferBytes(playerBufferMb * 1024 * 1024)
-                    .build()
-            )
-            .build()
-
-        exoPlayer.addListener(playerListener)
-        playerView.player = exoPlayer
+        newPlayer.addListener(playerListener)
+        playerView.player = newPlayer
         playerView.resizeMode = RESIZE_MODES[resizeModeIndex]
-        player = exoPlayer
+        player = newPlayer
 
         val items = buildMediaItems()
         if (items.isEmpty()) {
@@ -1647,9 +1682,9 @@ class InternalPlayerActivity : AppCompatActivity() {
         resumeIndex = null
         resumePositionMs = null
 
-        exoPlayer.setMediaItems(items, startIndex, startPosition)
-        exoPlayer.playWhenReady = true
-        exoPlayer.prepare()
+        newPlayer.setMediaItems(items, startIndex, startPosition)
+        newPlayer.playWhenReady = true
+        newPlayer.prepare()
 
         updateTitle()
         updateEpisodeButtons()
@@ -1658,6 +1693,36 @@ class InternalPlayerActivity : AppCompatActivity() {
         handler.post(progressTick)
         startTimecodeReporting()
         showControls()
+    }
+
+    private fun buildVlcPlayer(headers: Map<String, String>): Player = VlcPlayer(
+        context = this,
+        headers = headers,
+        subtitleUrls = intent.getStringArrayExtra(Extras.SUBS)?.toList().orEmpty(),
+        subtitleIndex = intent.getIntExtra(Extras.PLAYLIST_INDEX, 0),
+    )
+
+    private fun buildExoPlayer(headers: Map<String, String>): Player {
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .apply { if (headers.isNotEmpty()) setDefaultRequestProperties(headers) }
+
+        return ExoPlayer.Builder(
+            this,
+            buildRenderersFactory()
+        )
+            .setTrackSelector(DefaultTrackSelector(this))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(DefaultDataSource.Factory(this, httpFactory))
+            )
+            // How much of the stream is held in memory. LoadControl is fixed at build time, so
+            // changing this setting rebuilds the player (see applyBufferSize).
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setTargetBufferBytes(playerBufferMb * 1024 * 1024)
+                    .build()
+            )
+            .build()
     }
 
     /**
@@ -1800,6 +1865,18 @@ class InternalPlayerActivity : AppCompatActivity() {
         override fun onTracksChanged(tracks: Tracks) {
             updateEpisodeButtons()
             logTracks(tracks)
+            // Видео или звук есть, но ни одну дорожку этого типа ExoPlayer декодировать не
+            // может: он бы играл без картинки или молча. libVLC справится со своим FFmpeg.
+            if (!usingVlc) {
+                for (type in intArrayOf(C.TRACK_TYPE_VIDEO, C.TRACK_TYPE_AUDIO)) {
+                    val groups = tracks.groups.filter { it.type == type }
+                    if (groups.isNotEmpty() && groups.none { it.isSupported }) {
+                        val mime = groups.first().getTrackFormat(0).sampleMimeType
+                        switchToVlc("no supported ${if (type == C.TRACK_TYPE_VIDEO) "video" else "audio"} track ($mime)")
+                        return
+                    }
+                }
+            }
         }
 
         override fun onEvents(p: Player, events: Player.Events) {
@@ -1810,36 +1887,15 @@ class InternalPlayerActivity : AppCompatActivity() {
         override fun onPlayerError(error: PlaybackException) {
             Log.e(TAG, "Playback error: ${error.errorCodeName}", error)
 
-            // A codec the device can't handle should cost the sound, not the whole film: drop the
-            // audio track and carry on. Only reached when neither a platform decoder, HDMI
-            // passthrough nor the bundled FFmpeg decoders could take the track.
-            if (!audioDisabledAfterError && error.isAudioDecoderError()) {
-                val selector = trackSelector
-                if (selector != null) {
-                    audioDisabledAfterError = true
-                    Log.w(TAG, "Retrying without audio after decoder error")
-                    selector.parameters = selector.buildUponParameters()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-                        .build()
-                    App.toast(
-                        getString(
-                            R.string.audio_unsupported_format,
-                            error.formatDetail() ?: "?",
-                        ),
-                        true,
-                    )
-                    player?.prepare()
-                    return
-                }
-            }
-
             // What "combined" is supposed to mean. ExoPlayer's own decoder fallback only
             // covers a decoder that fails to *initialise*; a decoder that starts and then chokes
             // partway through — which is how MPEG-4 in AVI tends to fail — never reached the
             // software path at all.
-            if (!videoFallbackTried &&
+            if (!usingVlc &&
+                !videoFallbackTried &&
                 playerDecoderMode == Prefs.DECODER_COMBINED &&
-                error.isVideoFailure()
+                error.isVideoFailure() &&
+                !error.isMpeg4Part2()
             ) {
                 videoFallbackTried = true
                 softwareVideoFallback = true
@@ -1847,6 +1903,13 @@ class InternalPlayerActivity : AppCompatActivity() {
                 App.toast(R.string.player_switching_software, true)
                 // Posted, not called inline: this runs inside the player's own error callback.
                 handler.post { restartPlayer("software video fallback") }
+                return
+            }
+
+            // Последний шаг перед отказом: libVLC со своим FFmpeg — тем же, чем внешние плееры
+            // играют AVI с XviD/DivX. Сюда же — контейнер, который ExoPlayer не разбирает.
+            if (!usingVlc && error.isVlcWorthTrying()) {
+                switchToVlc("${error.errorCodeName} ${error.formatDetail().orEmpty()}")
                 return
             }
 
@@ -1879,14 +1942,17 @@ class InternalPlayerActivity : AppCompatActivity() {
             }
 
         /**
-         * Dropping the audio track only rescues playback when it was the audio decoder that gave
-         * up. The same error codes arrive from the video renderer, and silencing the film in that
-         * case fixes nothing while hiding what actually broke.
+         * MPEG-4 Part 2 (XviD/DivX). Программный декодер Android для него рассчитан максимум
+         * на 352×288, так что откат на него ничего не даёт — сразу в libVLC.
          */
-        private fun PlaybackException.isAudioDecoderError(): Boolean {
-            val mime = (this as? ExoPlaybackException)?.rendererFormat?.sampleMimeType
-            return isDecoderError() && mime?.startsWith("audio/") == true
-        }
+        private fun PlaybackException.isMpeg4Part2(): Boolean =
+            (this as? ExoPlaybackException)?.rendererFormat?.sampleMimeType in MPEG4_PART2_MIMES
+
+        private fun PlaybackException.isVlcWorthTrying(): Boolean =
+            isDecoderError() || isVideoFailure() || errorCode in setOf(
+                PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+                PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+            )
 
         private fun PlaybackException.isDecoderError(): Boolean = errorCode in setOf(
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,

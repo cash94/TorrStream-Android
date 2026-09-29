@@ -61,6 +61,13 @@
     <string name="player_decoder_software_desc">Программный в приоритете. Помогает с AVI (DivX/Xvid), грузит процессор</string>
     <string name="player_playback_failed">Не удалось воспроизвести: %1$s</string>
     <string name="player_decoder">Декодер</string>
+    <string name="player_engine">Движок</string>
+    <string name="player_engine_desc">Чем играть видео: ExoPlayer или встроенный VLC</string>
+    <string name="player_engine_auto">Авто</string>
+    <string name="player_engine_auto_desc">ExoPlayer; файлы, которые он не может декодировать (AVI с XviD/DivX, WMV…), переходят на VLC</string>
+    <string name="player_engine_vlc">Всегда VLC</string>
+    <string name="player_engine_vlc_desc">Свои декодеры FFmpeg для любых форматов; без передачи AC3/DTS на ресивер по HDMI</string>
+    <string name="player_switching_vlc">Устройство не может декодировать этот файл - переключаюсь на VLC</string>
     <string name="player_decoder_combined">Комбинированный</string>
     <string name="player_decoder_hardware">Аппаратный</string>
     <string name="player_decoder_software">Программный</string>

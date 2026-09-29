@@ -9,6 +9,7 @@ Android-приложение TorrStream: клиент для просмотра 
 
 - Минимальная версия Android: 6.0 (API 23)
 - Встроенный плеер: Media3 / ExoPlayer, с программным декодированием AC3 / E-AC3 / DTS / TrueHD
+- Запасной движок встроенного плеера — libVLC: включается сам, если ExoPlayer не может декодировать файл
 
 ## Лицензия
 
@@ -25,6 +26,7 @@ Android-приложение TorrStream: клиент для просмотра 
 |---|---|---|
 | [AndroidX Media3 / ExoPlayer](https://github.com/androidx/media) | Apache-2.0 | Движок встроенного плеера |
 | [media3-ffmpeg-decoder](https://github.com/jellyfin/jellyfin-androidx-media) | **GPL-3.0** | Программное декодирование AC3 / DTS / TrueHD |
+| [libVLC](https://code.videolan.org/videolan/vlc-android) | LGPL-2.1+ | Запасной движок встроенного плеера: AVI с XviD/DivX, WMV и другое, что не декодирует устройство |
 | [OkHttp](https://github.com/square/okhttp) | Apache-2.0 | Сетевые запросы |
 | [Glide](https://github.com/bumptech/glide) | Apache-2.0 / BSD | Загрузка изображений |
 | [Lottie](https://github.com/airbnb/lottie-android) | Apache-2.0 | Анимация загрузки |

@@ -30,6 +30,7 @@ object Prefs {
     private const val PLAYER_CLOCK_KEY = "player_clock"
     private const val PLAYER_BUFFER_KEY = "player_buffer_mb"
     private const val PLAYER_DECODER_KEY = "player_decoder"
+    private const val PLAYER_ENGINE_KEY = "player_engine"
 
     /** Hardware first, software picked up whenever hardware cannot handle the track. */
     const val DECODER_COMBINED = 0
@@ -37,6 +38,11 @@ object Prefs {
     const val DECODER_HARDWARE = 1
     /** Software decoders preferred, for formats the device's hardware handles badly. */
     const val DECODER_SOFTWARE = 2
+
+    /** Движок встроенного плеера: ExoPlayer с переходом на libVLC, когда он не справился. */
+    const val ENGINE_AUTO = 0
+    /** Всегда libVLC. */
+    const val ENGINE_VLC = 1
 
     /** Buffer sizes offered in the built-in player's settings, in megabytes. */
     val PLAYER_BUFFER_OPTIONS = intArrayOf(30, 50, 80, 120, 160, 200)
@@ -99,6 +105,11 @@ object Prefs {
     var Context.playerDecoderMode: Int
         get() = appPrefs.getInt(PLAYER_DECODER_KEY, DECODER_COMBINED)
         set(value) = appPrefs.edit { putInt(PLAYER_DECODER_KEY, value) }
+
+    /** Built-in player: which engine plays — one of the ENGINE_* constants. */
+    var Context.playerEngine: Int
+        get() = appPrefs.getInt(PLAYER_ENGINE_KEY, ENGINE_AUTO)
+        set(value) = appPrefs.edit { putInt(PLAYER_ENGINE_KEY, value) }
 
     /** Built-in player: how much of the stream ExoPlayer keeps buffered, in megabytes. */
     var Context.playerBufferMb: Int
