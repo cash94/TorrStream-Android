@@ -30,6 +30,7 @@ Android-приложение TorrStream: клиент для просмотра 
 | [Lottie](https://github.com/airbnb/lottie-android) | Apache-2.0 | Анимация загрузки |
 | [Conscrypt](https://github.com/google/conscrypt) | Apache-2.0 | TLS 1.3 на старых Android |
 | [Rhino](https://github.com/mozilla/rhino) | MPL-2.0 | Выполнение PAC-скриптов прокси |
+| [Montserrat](https://github.com/JulietaUla/Montserrat) | OFL-1.1 | Шрифт надписи на экране загрузки |
 
 Приложение начиналось как форк [LAMPA](https://github.com/lampa-app/LAMPA).
 

@@ -14,4 +14,9 @@
         <item name="alertDialogTheme">@style/AlertDialog</item>
         <item name="textInputStyle">@style/Widget.App.TextInputLayout</item>
     </style>
+    <!-- Главный экран: окно до загрузки разметки показывает тот же градиент, что и экран
+         загрузки, — без серой вспышки между иконкой в лаунчере и анимацией. -->
+    <style name="Theme.LAMPA.Launch">
+        <item name="android:windowBackground">@drawable/loader_backdrop</item>
+    </style>
 </resources>

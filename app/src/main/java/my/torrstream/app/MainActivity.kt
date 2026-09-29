@@ -29,6 +29,7 @@ import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.view.animation.AnimationUtils
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.ArrayAdapter
@@ -399,6 +400,7 @@ class MainActivity : BaseActivity(),
         }
         // Switch Loader (Note it control delayedVoidJsFunc)
         loaderView.visibility = View.GONE
+        findViewById<View>(R.id.loaderMark)?.clearAnimation()
 
         Log.d(TAG, "LAMPA onLoadFinished $url")
 
@@ -527,6 +529,8 @@ class MainActivity : BaseActivity(),
     private fun useSystemWebView() {
         setContentView(R.layout.activity_webview)
         loaderView = findViewById(R.id.loaderView)
+        findViewById<View>(R.id.loaderMark)
+            ?.startAnimation(AnimationUtils.loadAnimation(this, R.anim.loader_breathe))
         applyCutoutInsets()
         browser = SysView(this, R.id.webView)
         browser?.initialize()

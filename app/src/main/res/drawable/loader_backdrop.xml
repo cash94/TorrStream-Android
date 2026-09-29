@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Фон экрана загрузки: тёмно-синий радиальный градиент из палитры фронтенда,
-     центр чуть выше середины — под кольцо и надпись. -->
+<!-- Фон экрана загрузки: тёмный фиолетово-синий радиальный градиент, как на баннере
+     и значке приложения; центр чуть выше середины — под знак и надпись. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
     <gradient
-        android:centerColor="#141426"
+        android:centerColor="#10062C"
         android:centerX="0.5"
         android:centerY="0.42"
-        android:endColor="#07070C"
-        android:gradientRadius="620"
-        android:startColor="#1E1E36"
+        android:endColor="#06021A"
+        android:gradientRadius="720"
+        android:startColor="#200A4E"
         android:type="radial" />
 </shape>

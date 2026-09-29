@@ -93,7 +93,8 @@
             android:allowTaskReparenting="true"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.LAMPA.Launch">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
