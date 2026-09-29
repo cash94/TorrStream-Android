@@ -58,34 +58,42 @@ jobs:
           RELEASE_SIGN_KEY_ALIAS: ${{ secrets.RELEASE_SIGN_KEY_ALIAS }}
           RELEASE_SIGN_KEY_PASSWORD: ${{ secrets.RELEASE_SIGN_KEY_PASSWORD }}
 
-      - name: Name the APK by version
+      # Отдельный APK на архитектуру (splits в app/build.gradle): libVLC весит ~20 МБ
+      # на каждую. x86 собирается только для эмулятора и в релиз не идёт.
+      - name: Name the APKs by version and ABI
         id: apk
         run: |
-          src=$(find app/build/outputs/apk/lite/release -name '*.apk' | head -n1)
-          if [ -z "$src" ]; then echo "::error::APK не собрался"; exit 1; fi
+          dir=app/build/outputs/apk/lite/release
           # Версию берём из метаданных самой сборки — это ровно то, что попало
           # в APK. Прежний вариант с git describe на репозитории без тегов давал
           # пустую строку (|| echo не срабатывал: код возврата брался у sed),
           # и файл назывался «TorrStream-.apk»
-          meta=app/build/outputs/apk/lite/release/output-metadata.json
-          ver=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['elements'][0]['versionName'])" "$meta" 2>/dev/null || true)
+          ver=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['elements'][0]['versionName'])" "$dir/output-metadata.json" 2>/dev/null || true)
           if [ -z "$ver" ]; then ver=$(git describe --tags --dirty 2>/dev/null | sed 's/^v//'); fi
           if [ -z "$ver" ]; then ver=1.0.1; fi
-          out="TorrStream-$ver.apk"
-          cp "$src" "$out"
-          echo "path=$out" >> "$GITHUB_OUTPUT"
+          for abi in arm64-v8a armeabi-v7a; do
+            src="$dir/app-lite-$abi-release.apk"
+            if [ ! -f "$src" ]; then echo "::error::Не собрался APK $abi"; ls -la "$dir"; exit 1; fi
+            cp "$src" "TorrStream-$ver-$abi.apk"
+          done
+          echo "arm64=TorrStream-$ver-arm64-v8a.apk" >> "$GITHUB_OUTPUT"
+          echo "armv7=TorrStream-$ver-armeabi-v7a.apk" >> "$GITHUB_OUTPUT"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
 
-      - name: Verify signature
+      - name: Verify signatures
         run: |
           apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -n1)
-          "$apksigner" verify --print-certs "${{ steps.apk.outputs.path }}"
+          for f in "${{ steps.apk.outputs.arm64 }}" "${{ steps.apk.outputs.armv7 }}"; do
+            "$apksigner" verify --print-certs "$f"
+          done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: TorrStream-lite-${{ steps.apk.outputs.version }}
-          path: ${{ steps.apk.outputs.path }}
+          path: |
+            ${{ steps.apk.outputs.arm64 }}
+            ${{ steps.apk.outputs.armv7 }}
           # Квота хранилища Actions невелика: APK скачивают сразу после сборки,
           # а для долгого хранения есть релизы
           retention-days: 7
@@ -107,9 +115,20 @@ jobs:
           if [ ! -s release-notes.md ]; then echo "TorrStream ${GITHUB_REF_NAME#v}" > release-notes.md; fi
           cat release-notes.md
 
-      - name: Attach to release
+      # Два шага, а не один files: порядок вложений важен. Приложение до 1.1
+      # (Updater без выбора по архитектуре) качает ПОСЛЕДНИЙ APK релиза, а
+      # последним должен быть armeabi-v7a — он ставится на любое ARM-устройство.
+      # Один шаг грузит файлы параллельно, и порядок не гарантирован.
+      - name: Attach arm64 APK to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.apk.outputs.path }}
+          files: ${{ steps.apk.outputs.arm64 }}
+          body_path: release-notes.md
+
+      - name: Attach armeabi-v7a APK to release (last)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.armv7 }}
           body_path: release-notes.md

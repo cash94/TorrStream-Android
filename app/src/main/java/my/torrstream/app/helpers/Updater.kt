@@ -151,8 +151,8 @@ object Updater {
      * было нечего, обновление молча не устанавливалось.
      */
     private fun apkLink(rel: Release): String {
-        rel.assets.orEmpty().lastOrNull { it.browser_download_url.endsWith(".apk", true) }
-            ?.let { return it.browser_download_url }
+        val abis = Build.SUPPORTED_ABIS.toList()
+        pickApk(rel.assets.orEmpty(), abis)?.let { return it }
 
         val body = fetchText(rel.assets_url) ?: return ""
         val assets = try {
@@ -160,8 +160,7 @@ object Updater {
         } catch (e: Exception) {
             null
         } ?: return ""
-        return assets.lastOrNull { it.browser_download_url.endsWith(".apk", true) }
-            ?.browser_download_url ?: ""
+        return pickApk(assets, abis) ?: ""
     }
 
     private val download = Any()

@@ -42,7 +42,7 @@ Android-приложение TorrStream: клиент для просмотра 
 ./gradlew assembleLiteRelease
 ```
 
-Готовый APK: `app/build/outputs/apk/lite/release/`.
+Готовые APK: `app/build/outputs/apk/lite/release/` — отдельный на каждую архитектуру (`app-lite-armeabi-v7a-release.apk`, `app-lite-arm64-v8a-release.apk`; x86 — только для эмулятора). armeabi-v7a ставится на любую ARM-приставку и большинство телефонов, arm64-v8a нужен телефонам без поддержки 32-битного кода. Автообновление само выбирает APK под устройство.
 
 ### Требуется JDK 11
 

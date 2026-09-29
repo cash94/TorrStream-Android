@@ -47,11 +47,6 @@ android {
         multiDexEnabled = true // required when setting minSdkVersion to 20 or lower
         // Use SupportLibrary for vectors
         vectorDrawables.useSupportLibrary = true
-        // Только ARM: libVLC весит ~40 МБ нативного кода на архитектуру, а x86 среди
-        // телевизоров и приставок не встречается. armeabi-v7a ставится и на arm64.
-        ndk {
-            abiFilters 'armeabi-v7a', 'arm64-v8a'
-        }
     }
 
     signingConfigs {
@@ -79,18 +74,27 @@ android {
     }
 
     buildTypes {
-        debug {
-            // Эмулятор Android TV — x86
-            ndk {
-                abiFilters 'x86'
-            }
-        }
         release {
             signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+    // Отдельный APK на архитектуру: libVLC весит ~20 МБ сжатого нативного кода на каждую,
+    // и общий APK на все сразу вышел бы втрое тяжелее. armeabi-v7a ставится на любую
+    // ARM-приставку и на большинство arm64-устройств; arm64-v8a нужен 64-битным телефонам
+    // без поддержки 32-битного кода и быстрее декодирует программно. Какой скачать,
+    // решает Updater (pickApk) по Build.SUPPORTED_ABIS. x86 — только для эмулятора,
+    // в релиз не выкладывается (.github/workflows/build-lite.yml).
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'armeabi-v7a', 'arm64-v8a', 'x86'
+            universalApk false
+        }
+    }
+
     compileOptions {
         // Flag to enable support for the new language APIs
         // https://developer.android.com/studio/write/java8-support-table
