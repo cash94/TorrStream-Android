@@ -33,6 +33,9 @@ class HomeWatch() : BroadcastReceiver() {
                 if (BuildConfig.DEBUG)
                     Log.d(TAG, "ACTION_INITIALIZE_PROGRAMS received")
                 Scheduler.scheduleUpdate(true)
+                // Периодическое задание первый раз сработает только через интервал,
+                // а лаунчер ждёт каналы сейчас (установка приложения, сброс лаунчера)
+                Scheduler.forceUpdate()
             }
 
             TvContractCompat.ACTION_WATCH_NEXT_PROGRAM_BROWSABLE_DISABLED -> {

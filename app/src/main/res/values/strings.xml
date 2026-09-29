@@ -83,6 +83,8 @@
     <!--Settings-->
     <string name="update_chan_title">Update TV Home Channels</string>
     <string name="update_home_title">Update TV Recommendations</string>
+    <string name="tv_channels_title">TV Home Screen Channels</string>
+    <string name="tv_channels_enable_in_launcher">Turn channels on in the launcher settings: Customize channels</string>
     <string name="backup_restore_title">Settings Backup &amp; Restore</string>
     <string name="backup_all_title">TorrStream &amp; App Settings Backup</string>
     <string name="restore_app_title">Restore App Preferences</string>

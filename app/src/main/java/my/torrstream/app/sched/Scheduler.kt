@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import my.torrstream.app.App
 import my.torrstream.app.BuildConfig
+import my.torrstream.app.channels.Channels
 import my.torrstream.app.channels.WatchNext
 import my.torrstream.app.helpers.Helpers.isAndroidTV
 import java.util.concurrent.TimeUnit
@@ -113,19 +114,28 @@ object Scheduler {
         }
     }
 
+    /** One-shot update that reloads channel cards now (menu «update channels», INITIALIZE_PROGRAMS). */
+    fun forceUpdate() {
+        if (!isAndroidTV) return
+        schedulerScope.launch { updateContent(sync = false, force = true) }
+    }
+
     /**
      * Updates the Android TV Home content.
      *
      * @param sync Whether to update TV channels sequentially or in parallel.
+     * @param force Reload channel cards even if they were refreshed recently.
      */
     @RequiresApi(Build.VERSION_CODES.KITKAT)
-    fun updateContent(sync: Boolean) {
+    fun updateContent(sync: Boolean, force: Boolean = false) {
         if (!isUpdate.compareAndSet(false, true))
             return // Early return if update is already running
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (BuildConfig.DEBUG) Log.d("Scheduler", "updateContent call WatchNext.resyncAll()")
                 WatchNext.resyncAll()
+                if (BuildConfig.DEBUG) Log.d("Scheduler", "updateContent call Channels.update(force = $force)")
+                Channels.update(force)
             }
         } finally {
             isUpdate.set(false)

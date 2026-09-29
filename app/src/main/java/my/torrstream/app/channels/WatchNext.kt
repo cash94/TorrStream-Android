@@ -58,7 +58,13 @@ object WatchNext {
 
     private fun resumeIntentUri(activityJson: String): Uri {
         val intent = Intent(Intent.ACTION_VIEW, null, App.context, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Запущенное приложение получает интент в onNewIntent, а плеер поверх него
+            // закрывается — иначе лаунчер просто поднял бы задачу, не отдав карточку
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
             putExtra("continueWatch", true)
             putExtra("lampaActivity", activityJson)
             putExtra("android.intent.extra.START_PLAYBACK", true)
@@ -106,7 +112,8 @@ object WatchNext {
                 val poster = card.posterUri() ?: return@forEach // skip cardless/posterless items (e.g. trailers)
 
                 seenKeys += state.activityKey
-                val title = card.title ?: card.name ?: return@forEach
+                // Веб подписывает запуск плеера как «[1377237] Курьер»: в ряду лаунчера id ни к чему
+                val title = (card.title ?: card.name ?: return@forEach).replace(Regex("""^\[\d+]\s*"""), "")
 
                 val values = WatchNextProgram.Builder()
                     .setType(TvContractCompat.WatchNextPrograms.TYPE_MOVIE)

@@ -81,6 +81,8 @@
     <!--Settings-->
     <string name="update_chan_title">Оновити канали Android TV</string>
     <string name="update_home_title">Оновити рекомендації</string>
+    <string name="tv_channels_title">Канали на головному екрані</string>
+    <string name="tv_channels_enable_in_launcher">Увімкніть канали в налаштуваннях головного екрана: «Налаштувати канали»</string>
     <string name="backup_restore_title">Резервування та відновлення</string>
     <string name="backup_all_title">Зробити резервну копію всіх налаштувань</string>
     <string name="restore_app_title">Відновити налаштування додатка</string>

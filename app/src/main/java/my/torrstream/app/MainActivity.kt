@@ -69,6 +69,7 @@ import my.torrstream.app.browser.Browser
 import my.torrstream.app.browser.SysView
 //import my.torrstream.app.channels.ChannelManager.getChannelDisplayName
 //import my.torrstream.app.channels.WatchNext
+import my.torrstream.app.channels.Channels
 import my.torrstream.app.channels.WatchNext
 import my.torrstream.app.helpers.Backup
 import my.torrstream.app.helpers.Backup.loadFromBackup
@@ -113,6 +114,7 @@ import java.util.regex.Pattern
 import androidx.core.content.edit
 import androidx.core.view.isGone
 import androidx.core.net.toUri
+import androidx.tvprovider.media.tv.TvContractCompat
 
 
 class MainActivity : BaseActivity(),
@@ -125,6 +127,9 @@ class MainActivity : BaseActivity(),
     private lateinit var loaderView: View
     private lateinit var resultLauncher: ActivityResultLauncher<Intent>
     private lateinit var speechLauncher: ActivityResultLauncher<Intent>
+    private lateinit var channelBrowsableLauncher: ActivityResultLauncher<Intent>
+    /** Каналы, которые ждут системного вопроса «Показать на главном экране?» — по одному. */
+    private val pendingBrowsableChannels = ArrayDeque<Long>()
     private lateinit var progressIndicator: LinearProgressIndicator
     private lateinit var playerStateManager: PlayerStateManager
 
@@ -804,6 +809,10 @@ class MainActivity : BaseActivity(),
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                 handleSpeechResult(result)
             }
+        channelBrowsableLauncher =
+            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+                requestNextChannelBrowsable()
+            }
     }
 
     private fun setupUI() {
@@ -890,6 +899,15 @@ class MainActivity : BaseActivity(),
         // Log intent data for debugging
         debugLogIntentData(TAG, intent)
         intent ?: return
+        // Карточка из канала на главном экране Android TV
+        intent.getStringExtra(Channels.EXTRA_CARD)?.let { card ->
+            // Страница может перезагрузиться, а processIntent зовётся на каждой загрузке:
+            // карточка должна открыться один раз
+            intent.removeExtra(Channels.EXTRA_CARD)
+            openCardOverHome(card)
+            browser?.setFocus()
+            return
+        }
         // Parse intent extras
         val sid = intent.getStringExtra("id") ?: intent.getIntExtra("id", -1)
             .toString() // Change to String
@@ -985,13 +1003,23 @@ class MainActivity : BaseActivity(),
     }
 
     private fun handleContinueWatch(intent: Intent, delay: Long = 0) {
+        val activityJson = intent.getStringExtra("lampaActivity") ?: return
+        val startPlayback = intent.getBooleanExtra("android.intent.extra.START_PLAYBACK", false)
+        // processIntent зовётся на каждой загрузке страницы: без этого перезагрузка
+        // снова открывала бы карточку и запускала плеер
+        intent.removeExtra("continueWatch")
+        intent.removeExtra("lampaActivity")
+        intent.removeExtra("android.intent.extra.START_PLAYBACK")
         lifecycleScope.launch {
-            // fallback to lampaActivity?
-            val activityJson = intent.getStringExtra("lampaActivity") ?: return@launch
             if (isValidJson(activityJson)) {
-                openLampaContent(activityJson, delay) // needed to match state
+                // Карточка открывается поверх «Главной»; плеер, если его просят, встаёт
+                // сверху, и после выхода из него человек оказывается в карточке
+                getCardFromActivity(activityJson)?.let { card ->
+                    val state = playerStateManager.findStateByCard(card)
+                    continueWatchCardJson(card, state)?.let { openCardOverHome(it) }
+                }
                 delay(delay) // need to sure content loaded and activity stored
-                if (intent.getBooleanExtra("android.intent.extra.START_PLAYBACK", false)) {
+                if (startPlayback) {
                     val card = getCardFromActivity(activityJson) ?: return@launch
                     val state = playerStateManager.findStateByCard(card) ?: return@launch
                     // val matchingStates = playerStateManager.findMatchingStates(activityJson)
@@ -1033,6 +1061,37 @@ class MainActivity : BaseActivity(),
         }
     }
 
+    private val TMDB_ID_PREFIX = Regex("""^\[\d+]\s*""")
+    private val TORRENT_HASH = Regex("""^[0-9a-fA-F]{40}$""")
+
+    /**
+     * Карточка для «Продолжить просмотр»: хеш раздачи (откроется карточка торрента, как
+     * из «Моих торрентов») и, про запас, id TMDB — на случай, если раздачу из TorrServer
+     * уже удалили. У записей без привязки к TMDB (трейлер, раздача без карточки) id —
+     * адрес потока, его не передаём.
+     */
+    private fun continueWatchCardJson(
+        card: LampaCard,
+        state: PlayerStateManager.PlaybackState?
+    ): String? {
+        val item = state?.currentItem
+        // timeline.hash = «<хеш раздачи>_<номер файла>»; запасной путь — link= в адресе потока
+        val hash = listOfNotNull(
+            item?.timeline?.hash?.substringBefore('_'),
+            (item?.url ?: state?.currentUrl)?.let { Uri.parse(it).getQueryParameter("link") }
+        ).firstOrNull { TORRENT_HASH.matches(it) }
+        val id = card.id?.takeIf { it.toLongOrNull() != null }
+        if (hash == null && id == null) return null
+        return JSONObject().apply {
+            hash?.let { put("hash", it.lowercase()) }
+            id?.let { put("id", it) }
+            put("media_type", if (card.type == "tv") "tv" else "movie")
+            // Веб подписывает запуск плеера как «[1377237] Курьер» — в карточке id лишний
+            put("title", (card.title ?: card.name ?: "").replace(TMDB_ID_PREFIX, ""))
+            put("poster", card.img ?: "")
+        }.toString()
+    }
+
     // Helper function to check card match
     private fun cardMatchesState(
         card: LampaCard,
@@ -1064,6 +1123,146 @@ class MainActivity : BaseActivity(),
         }
     }
 
+    /**
+     * Открывает карточку поверх «Главной»: стек переходов начинается с главной, и «Назад»
+     * из карточки ведёт на неё. С хешем раздачи — карточка торрента (showDetail из
+     * torrents.js, как из «Моих торрентов»), без него или если раздачи в TorrServer уже
+     * нет — карточка TMDB, как её открывает ряд главной (openHomeItem в home.js).
+     * Веб-интерфейс на холодном старте ещё грузится, поэтому скрипт сам ждёт, пока
+     * появятся HomeScreen/Nav, соберутся ряды главной и придёт список торрентов.
+     */
+    private fun openCardOverHome(cardJson: String) {
+        val card = try {
+            JSONObject(cardJson)
+        } catch (e: JSONException) {
+            Log.w(TAG, "openCardOverHome: bad JSON $cardJson")
+            return
+        }
+        val id = card.optString("id").takeIf { it.isNotBlank() }
+        val hash = card.optString("hash").takeIf { TORRENT_HASH.matches(it) }
+        if (id == null && hash == null) return
+        // Пересобираем объект из известных полей: extra мог прислать кто угодно, а в
+        // страницу уходит только то, что JSONObject сам экранировал
+        val safe = JSONObject().apply {
+            put("id", id ?: "")
+            put("hash", hash?.lowercase() ?: "")
+            put("media_type", card.optString("media_type").ifBlank { "movie" })
+            put("title", card.optString("title"))
+            put("poster", card.optString("poster"))
+        }.toString().replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+        val opener = "(function(c){" +
+                "var readyTries=0,rowsTries=0,listTries=0;" +
+                "function ready(){return window.HomeScreen&&window.Nav&&window.AppState&&" +
+                "typeof window.showCatalogDetail==='function'&&" +
+                "(!c.hash||typeof window.showDetail==='function');}" +
+                "function findTorrent(){var l=AppState.torrents||[];" +
+                "for(var i=0;i<l.length;i++)if(l[i].hash&&l[i].hash.toLowerCase()===c.hash)return l[i];" +
+                "return null;}" +
+                "function openTmdb(){if(!c.id)return;" +
+                "var item={id:c.id,media_type:c.media_type,title:c.title,name:c.title," +
+                "poster_path:c.poster||null,torrent:[{name:c.title}]};" +
+                "Nav.push('detail',Nav.detailData(item,0));" +
+                "AppState.catalogIndex=0;AppState.androidBackCatalog=item;" +
+                "AppState.catalogPu=null;AppState.openInRow=true;" +
+                "window.showCatalogDetail(item,0,null);}" +
+                // showDetail сам кладёт запись 'torrent-detail' в стек переходов
+                "function openTorrent(t){window.showDetail(t);}" +
+                "function open(){" +
+                "if(!ready()){if(++readyTries<150)setTimeout(open,200);return;}" +
+                // Ждём ряды главной (до ~15 с): на неё и вернёт «Назад»
+                "var st=HomeScreen.state;" +
+                "if(st&&!st.built&&++rowsTries<75){setTimeout(open,200);return;}" +
+                // Список торрентов app.js грузит при старте (loadTorrents), ждём и его
+                "if(c.hash&&!AppState.torrentsLoaded&&++listTries<75){setTimeout(open,200);return;}" +
+                "try{if(AppState.currentScreen==='search'&&typeof hideSearchResults==='function')" +
+                "hideSearchResults({returnTo:'home'});}catch(e){}" +
+                "if(AppState.currentScreen!=='home'&&AppState.currentScreen!=='detail')" +
+                "HomeScreen.show({restoreFocus:false});" +
+                "Nav.reset('home');" +
+                "if(typeof HomeScreen.stopTrailer==='function')HomeScreen.stopTrailer();" +
+                "if(!c.hash)return openTmdb();" +
+                "var t=findTorrent();if(t)return openTorrent(t);" +
+                // Раздачу могли добавить после загрузки списка — перечитываем его один раз
+                "if(typeof window.refreshTorrentsList!=='function')return openTmdb();" +
+                "window.refreshTorrentsList().then(function(){var t2=findTorrent();" +
+                "if(t2)openTorrent(t2);else openTmdb();},openTmdb);" +
+                "}" +
+                "open();" +
+                "})"
+        logDebug("openCardOverHome $safe")
+        runVoidJsFunc(opener, safe)
+    }
+
+    /**
+     * Выбор каналов на главном экране Android TV. Отмеченные — те, что лаунчер сейчас
+     * показывает. Новые отметки уходят системе вопросом «Показать канал?» (сама включить
+     * канал программа не может), снятые — удаляют канал, пока его не отметят снова.
+     */
+    private fun showChannelsDialog() {
+        lifecycleScope.launch {
+            val browsable = withContext(Dispatchers.IO) {
+                try { Channels.browsableChannels() } catch (e: Exception) { emptySet() }
+            }
+            val defs = Channels.DEFS
+            val checked = BooleanArray(defs.size) { defs[it].key in browsable }
+            val initial = checked.copyOf()
+            val dialog = AlertDialog.Builder(this@MainActivity).apply {
+                setTitle(R.string.tv_channels_title)
+                setMultiChoiceItems(defs.map { it.name }.toTypedArray(), checked) { _, which, isChecked ->
+                    checked[which] = isChecked
+                }
+                setPositiveButton(android.R.string.ok) { _, _ ->
+                    val enable = defs.indices.filter { checked[it] && !initial[it] }.map { defs[it].key }
+                    val disable = defs.indices.filter { !checked[it] && initial[it] }.map { defs[it].key }
+                    applyChannelSelection(enable, disable)
+                }
+                setNegativeButton(android.R.string.cancel, null)
+                setOnDismissListener {
+                    isMenuVisible = false
+                    showFab(true)
+                }
+            }.create()
+            showFullScreenDialog(dialog)
+            isMenuVisible = true
+        }
+    }
+
+    private fun applyChannelSelection(enable: List<String>, disable: List<String>) {
+        if (enable.isEmpty() && disable.isEmpty()) return
+        lifecycleScope.launch {
+            val ids = withContext(Dispatchers.IO) {
+                disable.forEach { key ->
+                    Channels.setDisabled(key, true)
+                    Channels.deleteChannel(key)
+                }
+                enable.mapNotNull { key ->
+                    Channels.setDisabled(key, false)
+                    Channels.ensureChannel(key)
+                }
+            }
+            // Карточки новых каналов подтянутся, пока пользователь отвечает системе
+            Channels.invalidate()
+            Scheduler.forceUpdate()
+            pendingBrowsableChannels.clear()
+            pendingBrowsableChannels.addAll(ids)
+            requestNextChannelBrowsable()
+        }
+    }
+
+    private fun requestNextChannelBrowsable() {
+        val channelId = pendingBrowsableChannels.removeFirstOrNull() ?: return
+        val intent = Intent(TvContractCompat.ACTION_REQUEST_CHANNEL_BROWSABLE)
+            .putExtra(TvContractCompat.EXTRA_CHANNEL_ID, channelId)
+        try {
+            channelBrowsableLauncher.launch(intent)
+        } catch (e: Exception) {
+            // Лаунчер не умеет спрашивать — канал включается в его настройках
+            Log.w(TAG, "ACTION_REQUEST_CHANNEL_BROWSABLE не поддерживается", e)
+            pendingBrowsableChannels.clear()
+            App.toast(R.string.tv_channels_enable_in_launcher)
+        }
+    }
+
     private suspend fun openLampaContent(json: String, delay: Long = 0) {
         runVoidJsFunc("window.start_deep_link = ", json)
         delay(delay)
@@ -1087,6 +1286,13 @@ class MainActivity : BaseActivity(),
                 action = "updateOrClose",
                 icon = if (isAndroidTV) R.drawable.round_refresh_24 else R.drawable.round_close_24
             ),
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Channels.isSupported) menuItems += MenuItem(
+            title = getString(R.string.tv_channels_title),
+            action = "showChannelsDialog",
+            icon = R.drawable.round_link_24
+        )
+        menuItems += listOf(
             MenuItem(
                 title = getString(R.string.change_url_title),
                 action = "showUrlInputDialog",
@@ -1127,9 +1333,11 @@ class MainActivity : BaseActivity(),
                 when (menuItems[which].action) {
                     "updateOrClose" -> {
                         if (isAndroidTV) {
-                            Scheduler.scheduleUpdate(false)
+                            Scheduler.forceUpdate()
                         }
                     }
+
+                    "showChannelsDialog" -> showChannelsDialog()
 
                     "showUrlInputDialog" -> {
                         App.toast(R.string.change_note)

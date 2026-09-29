@@ -142,7 +142,12 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     private fun buildActivityJson(jsonObject: JSONObject, link: String): String {
         val card = JSONObject().apply {
             val title = jsonObject.optString("title", "")
-            putSafe("id", jsonObject.optString("id").ifEmpty { link })
+            // id карточки TMDB — по нему «Продолжить просмотр» откроет её снова. optString
+            // отдаёт JSON null строкой "null", и все записи без id сливались в одну.
+            val tmdbId = listOf("id", "tmdb_id")
+                .map { key -> jsonObject.opt(key)?.takeIf { it != JSONObject.NULL }?.toString().orEmpty() }
+                .firstOrNull { it.isNotBlank() && it != "null" }
+            putSafe("id", tmdbId ?: link)
             putSafe("title", title)
             putSafe("name", title)
             putSafe("type", jsonObject.optString("type").ifEmpty { "movie" })
