@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Фон адаптивной иконки: тот же тёмно-фиолетовый радиальный градиент, что у
+     прежней квадратной иконки (lampa_icon). Лаунчер сам обрезает слой под свою
+     форму — круг, скруглённый квадрат, — без белой подложки вокруг. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:type="radial"
+        android:gradientRadius="75%p"
+        android:startColor="#1A0546"
+        android:endColor="#05011A" />
+</shape>

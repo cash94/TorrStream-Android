@@ -1203,6 +1203,10 @@ class MainActivity : BaseActivity(),
      * канал программа не может), снятые — удаляют канал, пока его не отметят снова.
      */
     private fun showChannelsDialog() {
+        if (Channels.isGoogleTv) {
+            showGoogleTvChannelDialog()
+            return
+        }
         lifecycleScope.launch {
             val browsable = withContext(Dispatchers.IO) {
                 try { Channels.browsableChannels() } catch (e: Exception) { emptySet() }
@@ -1229,6 +1233,45 @@ class MainActivity : BaseActivity(),
             showFullScreenDialog(dialog)
             isMenuVisible = true
         }
+    }
+
+    /**
+     * Google TV показывает от приложения один канал, поэтому здесь выбирают не каналы, а
+     * категории, которые в этот канал сложить (до [Channels.GTV_MAX_KEYS]). Спрашивать систему
+     * ни о чём не нужно — канал уже на экране, меняется только его содержимое.
+     */
+    private fun showGoogleTvChannelDialog() {
+        val defs = Channels.DEFS
+        val selected = Channels.googleTvKeys().toSet()
+        val checked = BooleanArray(defs.size) { defs[it].key in selected }
+        lateinit var dialog: AlertDialog
+        dialog = AlertDialog.Builder(this).apply {
+            setTitle(getString(R.string.tv_channels_gtv_title, Channels.GTV_MAX_KEYS))
+            setMultiChoiceItems(defs.map { it.name }.toTypedArray(), checked) { _, which, isChecked ->
+                if (isChecked && checked.count { it } >= Channels.GTV_MAX_KEYS) {
+                    // Одиннадцатую не даём: снимаем отметку обратно
+                    dialog.listView.setItemChecked(which, false)
+                    App.toast(getString(R.string.tv_channels_gtv_limit, Channels.GTV_MAX_KEYS))
+                    return@setMultiChoiceItems
+                }
+                checked[which] = isChecked
+            }
+            setPositiveButton(android.R.string.ok) { _, _ ->
+                val keys = defs.indices.filter { checked[it] }.map { defs[it].key }
+                lifecycleScope.launch(Dispatchers.IO) {
+                    Channels.setGoogleTvKeys(keys)
+                    Channels.invalidate()
+                    Scheduler.forceUpdate()
+                }
+            }
+            setNegativeButton(android.R.string.cancel, null)
+            setOnDismissListener {
+                isMenuVisible = false
+                showFab(true)
+            }
+        }.create()
+        showFullScreenDialog(dialog)
+        isMenuVisible = true
     }
 
     private fun applyChannelSelection(enable: List<String>, disable: List<String>) {

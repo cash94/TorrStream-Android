@@ -90,6 +90,8 @@
     <string name="update_home_title">Обновить ТВ-рекомендации</string>
     <string name="tv_channels_title">Каналы на главном экране</string>
     <string name="tv_channels_enable_in_launcher">Включите каналы в настройках главного экрана: «Настроить каналы»</string>
+    <string name="tv_channels_gtv_title">Канал на Google TV: до %1$d категорий</string>
+    <string name="tv_channels_gtv_limit">Можно выбрать не больше %1$d категорий</string>
     <string name="backup_restore_title">Резервирование и восстановление</string>
     <string name="backup_all_title">Сделать резервную копию всех настроек</string>
     <string name="restore_app_title">Восстановить настройки приложения</string>

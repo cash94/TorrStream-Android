@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Адаптивная иконка (Android 8+). Без неё лаунчеры, рисующие иконки кругом,
+     вписывали квадратную lampa_icon в белую подложку. Логотип — в безопасной зоне
+     (ic_launcher_foreground, 58 dp из 108), надписи нет: в круге она бы обрезалась.
+     Android 6–7 берут обычную картинку из mipmap-*/ic_launcher.png. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

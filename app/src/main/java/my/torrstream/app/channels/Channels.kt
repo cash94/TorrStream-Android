@@ -2,8 +2,10 @@ package my.torrstream.app.channels
 
 import android.annotation.SuppressLint
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context.MODE_PRIVATE
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
@@ -35,6 +37,11 @@ import my.torrstream.app.net.HttpHelper
  * Показывать все каналы сразу система не даёт: без вопроса пользователю видимым становится
  * только первый канал приложения. Остальные включаются в настройках лаунчера или из меню
  * приложения («Каналы на главном экране»), которое спрашивает систему по одному каналу.
+ *
+ * Google TV ([isGoogleTv]) показывает от приложения только этот первый канал: ни запроса
+ * «Показать канал?», ни настройки каналов у него нет. Поэтому там канал один — общий: в
+ * нём карточки выбранных в меню категорий (до [GTV_MAX_KEYS]), поровну на [ITEMS_PER_CHANNEL]
+ * мест. Одна категория — 30 её карточек и её название, десять — по три, канал «TorrStream».
  */
 @RequiresApi(Build.VERSION_CODES.O)
 object Channels {
@@ -51,6 +58,12 @@ object Channels {
     private const val PREF_UPDATED_AT = "updated_at"
     private const val PREF_SERVER = "server"
     private const val PREF_DISABLED = "disabled"
+    private const val PREF_GTV_KEYS = "gtv_keys"
+
+    /** Сколько категорий можно сложить в общий канал Google TV. */
+    const val GTV_MAX_KEYS = 10
+    private const val GOOGLE_TV_LAUNCHER = "com.google.android.apps.tv.launcherx"
+    private const val MIXED_CHANNEL_NAME = "TorrStream"
 
     enum class Source { TMDB, KINOPOISK, CATALOG, RUS }
 
@@ -113,7 +126,11 @@ object Channels {
         val poster: String,
         val overview: String?,
         val year: String?,
-    )
+        /** Категория карточки в общем канале Google TV — пишется в описание. */
+        val category: String? = null,
+    ) {
+        fun withCategory(name: String) = Card(id, mediaType, title, poster, overview, year, name)
+    }
 
     private val prefs get() = App.context.getSharedPreferences("tv_channels", MODE_PRIVATE)
 
@@ -131,6 +148,88 @@ object Channels {
             Log.w(TAG, "TvProvider недоступен", e)
             false
         }
+
+    /**
+     * Google TV: его лаунчер — домашний экран устройства. Классический лаунчер Android TV
+     * (com.google.android.tvlauncher) и лаунчеры других прошивок сюда не попадают.
+     */
+    val isGoogleTv: Boolean
+        get() = (BuildConfig.DEBUG && prefs.getBoolean("debug_force_google_tv", false)) || try {
+            val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            App.context.packageManager
+                .resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName == GOOGLE_TV_LAUNCHER
+        } catch (e: Exception) {
+            false
+        }
+
+    // ==================== GOOGLE TV: ОБЩИЙ КАНАЛ ====================
+
+    /** Категории общего канала Google TV в порядке [DEFS]. По умолчанию — как раньше, «В тренде». */
+    fun googleTvKeys(): List<String> {
+        val saved = prefs.getString(PREF_GTV_KEYS, null)
+            ?.split(',')?.filter { key -> DEFS.any { it.key == key } }
+        return saved?.takeIf { it.isNotEmpty() } ?: listOf(DEFAULT_KEY)
+    }
+
+    fun setGoogleTvKeys(keys: List<String>) {
+        val ordered = DEFS.map { it.key }.filter { it in keys }.take(GTV_MAX_KEYS)
+        prefs.edit { putString(PREF_GTV_KEYS, ordered.ifEmpty { listOf(DEFAULT_KEY) }.joinToString(",")) }
+    }
+
+    /**
+     * Один канал из нескольких категорий. Это всегда канал [DEFAULT_KEY] — первый созданный
+     * приложением, единственный, что Google TV показывает: новый канал он бы уже не показал.
+     * Карточки идут по кругу (первая каждой категории, вторая каждой…), чтобы в видимой части
+     * ряда были все категории; повторы фильма между категориями пропускаются.
+     */
+    private fun updateGoogleTv(server: String, imageHost: String, published: Map<String, Long>): Int {
+        val defs = googleTvKeys().mapNotNull { key -> DEFS.firstOrNull { it.key == key } }
+        val perCategory = ITEMS_PER_CHANNEL / defs.size.coerceAtLeast(1)
+        val mixed = defs.size > 1
+
+        val lists = defs.mapNotNull { def ->
+            val cards = try {
+                fetchCards(server, def, imageHost)
+            } catch (e: Exception) {
+                Log.w(TAG, "${def.key}: ${e.message}")
+                null
+            } ?: return@mapNotNull null
+            if (mixed) cards.map { it.withCategory(def.name) } else cards
+        }
+        if (lists.isEmpty()) return 0
+
+        val seen = mutableSetOf<String>()
+        val picked = lists.map { cards ->
+            cards.filter { seen.add("${it.mediaType}:${it.id}") }.take(perCategory)
+        }
+        val cards = mutableListOf<Card>()
+        for (i in 0 until perCategory) picked.forEach { list -> list.getOrNull(i)?.let { cards += it } }
+        if (cards.isEmpty()) return 0
+
+        val defaultDef = DEFS.first { it.key == DEFAULT_KEY }
+        val channelId = published[DEFAULT_KEY] ?: createChannel(defaultDef) ?: return 0
+        renameChannel(channelId, if (mixed) MIXED_CHANNEL_NAME else defs.first().name)
+        syncPrograms(channelId, defaultDef, cards)
+
+        // Остальные каналы Google TV не показывает — незачем их и обновлять
+        published.filterKeys { it != DEFAULT_KEY }.values.forEach { deleteChannel(it) }
+        return 1
+    }
+
+    private fun renameChannel(channelId: Long, name: String) {
+        try {
+            App.context.contentResolver.update(
+                TvContractCompat.buildChannelUri(channelId),
+                ContentValues().apply {
+                    put(TvContractCompat.Channels.COLUMN_DISPLAY_NAME, name)
+                    put(TvContractCompat.Channels.COLUMN_DESCRIPTION, name)
+                }, null, null
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Канал $channelId не переименован", e)
+        }
+    }
 
     // ==================== ВКЛЮЧЁННЫЕ КАНАЛЫ ====================
 
@@ -197,6 +296,16 @@ object Channels {
             val disabled = disabledKeys()
             val published = publishedChannels()
             var ok = 0
+
+            if (isGoogleTv) {
+                ok = updateGoogleTv(server, imageHost, published)
+                if (ok > 0) prefs.edit {
+                    putLong(PREF_UPDATED_AT, now)
+                    putString(PREF_SERVER, server)
+                }
+                Log.i(TAG, "Google TV: общий канал ${if (ok > 0) "обновлён" else "не обновлён"}")
+                return
+            }
 
             DEFS.forEach { def ->
                 if (def.key in disabled) {
@@ -337,7 +446,12 @@ object Channels {
                 .setInternalProviderId(pid)
                 .setWeight(cards.size - index) // лаунчер ставит левее карточку с большим весом
                 .setIntentUri(Uri.parse(cardIntent(card).toUri(Intent.URI_INTENT_SCHEME)))
-            card.overview?.takeIf { it.isNotBlank() }?.let { builder.setDescription(it) }
+            val overview = card.overview?.takeIf { it.isNotBlank() }
+            val description = when {
+                card.category != null && overview != null -> "${card.category} · $overview"
+                else -> card.category ?: overview
+            }
+            description?.let { builder.setDescription(it) }
             card.year?.let { builder.setReleaseDate(it) }
             val values = builder.build().toContentValues()
 
