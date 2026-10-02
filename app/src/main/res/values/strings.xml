@@ -87,6 +87,9 @@
     <string name="update_chan_title">Update TV Home Channels</string>
     <string name="update_home_title">Update TV Recommendations</string>
     <string name="tv_channels_title">TV Home Screen Channels</string>
+    <string name="torrserver_notification_title" translatable="false">TorrServer</string>
+    <string name="torrserver_notification_text">TorrServer is running on port %1$d</string>
+    <string name="torrserver_channel" translatable="false">TorrServer</string>
     <string name="update_check_title">Check for updates</string>
     <string name="update_checking">Checking for updates…</string>
     <string name="update_latest">You have the latest version (%s)</string>

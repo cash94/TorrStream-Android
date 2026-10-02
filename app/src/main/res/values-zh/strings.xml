@@ -85,6 +85,7 @@
     <string name="update_chan_title">更新渠道和推荐</string>
     <string name="update_home_title">更新建议</string>
     <string name="tv_channels_title">主屏幕频道</string>
+    <string name="torrserver_notification_text">TorrServer 正在端口 %1$d 上运行</string>
     <string name="update_check_title">检查更新</string>
     <string name="update_checking">正在检查更新…</string>
     <string name="update_latest">已是最新版本（%s）</string>

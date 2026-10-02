@@ -17,6 +17,8 @@ import my.torrstream.app.browser.Browser
 import my.torrstream.app.helpers.Helpers.debugLog
 import my.torrstream.app.helpers.Prefs.appLang
 import my.torrstream.app.helpers.Prefs.storagePrefs
+import my.torrstream.app.torrserver.TorrServerDiscovery
+import my.torrstream.app.torrserver.TorrServerManager
 
 class AndroidJS(private val mainActivity: MainActivity, private val browser: Browser) {
 
@@ -179,6 +181,40 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     fun choosePlayer() {
         mainActivity.runOnUiThread { mainActivity.showChoosePlayerDialog() }
     }
+
+    // ==================== Свой TorrServer (torrserver/TorrServerManager) ====================
+    // Веб: настройки → TorrServer → «TorrServer на этом устройстве» (torrents.js).
+    // Все вызовы мгновенные: скачивание, запуск и проверка порта идут в фоне, а веб
+    // опрашивает tsLocalStatus.
+
+    /** JSON: установлен ли, версия, идёт ли загрузка, отвечает ли порт 8090 и чей там сервер */
+    @JavascriptInterface
+    fun tsLocalStatus(): String = TorrServerManager.statusJson()
+
+    /** Скачать (или обновить) и запустить */
+    @JavascriptInterface
+    fun tsLocalInstall() = TorrServerManager.installAsync(startAfter = true)
+
+    /** Запустить свою копию, если порт 8090 свободен */
+    @JavascriptInterface
+    fun tsLocalStart() = TorrServerManager.startIfFree()
+
+    @JavascriptInterface
+    fun tsLocalStop() = TorrServerManager.stop()
+
+    /** Узнать номер последнего релиза — для кнопки «Обновить» */
+    @JavascriptInterface
+    fun tsLocalCheckUpdate() = TorrServerManager.checkLatestAsync()
+
+    // Поиск TorrServer в сети по mDNS (torrserver/TorrServerDiscovery)
+    @JavascriptInterface
+    fun tsDiscoverStart() {
+        TorrServerDiscovery.start()
+    }
+
+    /** JSON: идёт ли поиск и найденные серверы (name, url, version, self) */
+    @JavascriptInterface
+    fun tsDiscoverStatus(): String = TorrServerDiscovery.statusJson()
 
     // https://stackoverflow.com/a/41560207
     // https://copyprogramming.com/howto/android-webview-savestate

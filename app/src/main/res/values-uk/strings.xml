@@ -85,6 +85,7 @@
     <string name="update_chan_title">Оновити канали Android TV</string>
     <string name="update_home_title">Оновити рекомендації</string>
     <string name="tv_channels_title">Канали на головному екрані</string>
+    <string name="torrserver_notification_text">TorrServer працює на порту %1$d</string>
     <string name="update_check_title">Перевірка оновлень</string>
     <string name="update_checking">Перевіряю оновлення…</string>
     <string name="update_latest">Встановлено останню версію (%s)</string>

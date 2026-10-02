@@ -256,6 +256,8 @@ class MainActivity : BaseActivity(),
         SELECTED_PLAYER = appPlayer
         logDebug("onCreate LAMPA_URL: $LAMPA_URL")
         logDebug("onCreate SELECTED_PLAYER: $SELECTED_PLAYER")
+        // Свой TorrServer: запускали в прошлый раз — поднимаем снова (если порт свободен)
+        my.torrstream.app.torrserver.TorrServerManager.autostartIfNeeded()
         playerStateManager = PlayerStateManager(this).apply {
             purgeOldStates()
         }
@@ -1337,6 +1339,10 @@ class MainActivity : BaseActivity(),
                 icon = R.drawable.round_exit_to_app_24
             )
         )
+        // «Завершить работу» — всегда первым пунктом. Не на ТВ первым был «Закрыть
+        // меню» — он уходит в конец; на ТВ «Обновить каналы» просто сдвигается вниз
+        menuItems.add(0, menuItems.removeAt(menuItems.size - 1))
+        if (!isAndroidTV) menuItems.add(menuItems.removeAt(1))
 
         // Set up the adapter
         val adapter = ImgArrayAdapter(
