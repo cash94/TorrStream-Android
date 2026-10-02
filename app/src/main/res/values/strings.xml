@@ -2,10 +2,6 @@
     <string name="app_name" translatable="false">TorrStream</string>
     <string name="provider_auth" translatable="false">my.torrstream.app</string>
     <string name="no_player_activity_found">No matching multimedia player found. Please, install player from Google Play Store or any other source. We recommend Just Player, Vimu Media Player, VLC.</string>
-    <string name="keep_connection_channel">Background connection</string>
-    <string name="keep_connection_notification">Keeping connection alive during playback</string>
-    <string name="keep_connection_enable">Enable keeping the socket open</string>
-    <string name="keep_connection_disable">Disable keeping the socket open</string>
     <string name="no_torrent_activity_found">There is no application to open torrent links. Please, install TorrServe or any other App working with torrents.</string>
     <string name="no_launch_player">The selected player does not support playing this video</string>
     <string name="invalid_url">Enter the correct website address, for example:\nhttp://torrstream.online</string>
@@ -91,20 +87,20 @@
     <string name="update_chan_title">Update TV Home Channels</string>
     <string name="update_home_title">Update TV Recommendations</string>
     <string name="tv_channels_title">TV Home Screen Channels</string>
+    <string name="update_check_title">Check for updates</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_latest">You have the latest version (%s)</string>
+    <string name="update_check_failed">Could not check for updates. Check your connection</string>
+    <string name="tv_channels_updating">Updating channels…</string>
+    <string name="tv_channels_updated">Channels updated</string>
+    <string name="tv_channels_update_failed">Could not update channels. Check the server address</string>
+    <string name="tv_channels_update_busy">Channels are already being updated</string>
     <string name="tv_channels_enable_in_launcher">Turn channels on in the launcher settings: Customize channels</string>
     <string name="tv_channels_gtv_title">Google TV channel: up to %1$d categories</string>
     <string name="tv_channels_gtv_limit">You can pick up to %1$d categories</string>
-    <string name="backup_restore_title">Settings Backup &amp; Restore</string>
-    <string name="backup_all_title">TorrStream &amp; App Settings Backup</string>
-    <string name="restore_app_title">Restore App Preferences</string>
-    <string name="restore_storage_title">Restore TorrStream Settings</string>
-    <string name="default_setting_title">Load Default Settings</string>
-    <string name="change_note">This action can reset the TorrStream settings to their default values. Before this change, it is recommended to make a backup copy of your settings!</string>
-    <string name="settings_saved_toast">All settings saved to %s</string>
-    <string name="settings_save_fail">Failed to perform backup</string>
+    <string name="change_note">This action can reset the TorrStream settings to their default values.</string>
     <string name="settings_migrate_fail">Failed to migrate settings</string>
     <string name="settings_rest_fail">Failed to restore settings</string>
-    <string name="settings_restored">Settings restored</string>
     <string name="migrate">Migration</string>
     <!--App Errors-->
     <string name="app_crash_title">Sorry for the Inconvenience</string>

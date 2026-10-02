@@ -279,17 +279,18 @@ object Channels {
      * Публикует каналы и их карточки. Сетевой, звать не с главного потока.
      * Без [force] обновляет не чаще раза в [REFRESH_INTERVAL_MS] — Scheduler зовёт
      * нас на каждой загрузке страницы и каждые 15 минут.
+     * Возвращает, свежие ли теперь каналы (для тоста пункта меню «Обновить каналы»).
      */
-    fun update(force: Boolean = false) {
+    fun update(force: Boolean = false): Boolean {
         if (!isSupported) {
             if (BuildConfig.DEBUG) Log.d(TAG, "Каналы не поддерживаются устройством")
-            return
+            return false
         }
-        val server = serverBase() ?: return
+        val server = serverBase() ?: return false
         val now = System.currentTimeMillis()
         val fresh = now - prefs.getLong(PREF_UPDATED_AT, 0L) < REFRESH_INTERVAL_MS &&
                 prefs.getString(PREF_SERVER, null) == server
-        if (!force && fresh) return
+        if (!force && fresh) return true
 
         try {
             val imageHost = fetchImageHost(server)
@@ -304,7 +305,7 @@ object Channels {
                     putString(PREF_SERVER, server)
                 }
                 Log.i(TAG, "Google TV: общий канал ${if (ok > 0) "обновлён" else "не обновлён"}")
-                return
+                return ok > 0
             }
 
             DEFS.forEach { def ->
@@ -338,8 +339,10 @@ object Channels {
                 putString(PREF_SERVER, server)
             }
             Log.i(TAG, "Каналы обновлены: $ok из ${DEFS.size}")
+            return ok > 0
         } catch (e: Exception) {
             Log.e(TAG, "update failed", e)
+            return false
         }
     }
 

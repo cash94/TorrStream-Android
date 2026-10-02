@@ -72,10 +72,7 @@ import my.torrstream.app.browser.SysView
 //import my.torrstream.app.channels.WatchNext
 import my.torrstream.app.channels.Channels
 import my.torrstream.app.channels.WatchNext
-import my.torrstream.app.helpers.Backup
 import my.torrstream.app.helpers.Backup.loadFromBackup
-import my.torrstream.app.helpers.Backup.backupSettings
-import my.torrstream.app.helpers.Backup.validateStorageBackup
 import my.torrstream.app.helpers.Helpers
 import my.torrstream.app.helpers.Helpers.debugLogIntentData
 import my.torrstream.app.helpers.Helpers.dp2px
@@ -83,14 +80,13 @@ import my.torrstream.app.helpers.Helpers.getJson
 import my.torrstream.app.helpers.Helpers.isAndroidTV
 import my.torrstream.app.helpers.Helpers.isTvContentProviderAvailable
 import my.torrstream.app.helpers.Helpers.isValidJson
-import my.torrstream.app.helpers.PermHelpers
 import my.torrstream.app.helpers.PermHelpers.hasMicPermissions
 import my.torrstream.app.helpers.PermHelpers.verifyMicPermissions
 import my.torrstream.app.helpers.Prefs
 import my.torrstream.app.helpers.Prefs.addUrlHistory
 import my.torrstream.app.helpers.Prefs.appLang
 import my.torrstream.app.helpers.Prefs.appPlayer
-import my.torrstream.app.helpers.Prefs.playerKeepConnection
+import my.torrstream.app.helpers.Updater
 import my.torrstream.app.helpers.Prefs.appPrefs
 import my.torrstream.app.helpers.Prefs.appUrl
 import my.torrstream.app.helpers.Prefs.defPrefs
@@ -124,7 +120,6 @@ class MainActivity : BaseActivity(),
     private var browser: Browser? = null
     private var browserInitComplete = false
     private var isMenuVisible = false
-    private var isPlayerLaunching = false // suppress WebView pauseTimers while our external player is open
     private lateinit var loaderView: View
     private lateinit var resultLauncher: ActivityResultLauncher<Intent>
     private lateinit var speechLauncher: ActivityResultLauncher<Intent>
@@ -236,7 +231,6 @@ class MainActivity : BaseActivity(),
         var delayedVoidJsFunc = mutableListOf<List<String>>()
         var playerTimeCode: String = "continue"
         var playerAutoNext: Boolean = true
-        var keepPlayerConnection: Boolean = true
         var lampaActivity: String = "{}" // JSON
         /** Web app's clientId, read out of the WebView so progress saving needs no page support. */
         var webClientId: String? = null
@@ -260,7 +254,6 @@ class MainActivity : BaseActivity(),
         super.onCreate(savedInstanceState)
         LAMPA_URL = appUrl
         SELECTED_PLAYER = appPlayer
-        keepPlayerConnection = playerKeepConnection
         logDebug("onCreate LAMPA_URL: $LAMPA_URL")
         logDebug("onCreate SELECTED_PLAYER: $SELECTED_PLAYER")
         playerStateManager = PlayerStateManager(this).apply {
@@ -289,9 +282,6 @@ class MainActivity : BaseActivity(),
 
     override fun onResume() {
         super.onResume()
-        isPlayerLaunching = false // returned to foreground; player (if any) is closed
-        browser?.setKeepVisible(false) // restore normal visibility handling
-        PlaybackService.stop(this) // no longer need to hold the process foreground
         hideSystemUI()
         if (!isTvBox) setupFab()
         logDebug("onResume() browserInitComplete $browserInitComplete")
@@ -301,15 +291,12 @@ class MainActivity : BaseActivity(),
     }
 
     override fun onPause() {
-        // Keep JS timers (and the RCH socket heartbeat) alive while our external player is open,
-        // but only when the user enabled it. Home/real backgrounding still pauses as before.
-        if (browserInitComplete && !(isPlayerLaunching && keepPlayerConnection))
+        if (browserInitComplete)
             browser?.pauseTimers()
         super.onPause()
     }
 
     override fun onDestroy() {
-        PlaybackService.stop(this)
         if (browserInitComplete) {
             browser?.apply {
                 // Destroy only if not already destroyed
@@ -327,11 +314,8 @@ class MainActivity : BaseActivity(),
 
     // handle user pressed Home
     override fun onUserLeaveHint() {
-        logDebug("onUserLeaveHint() isPlayerLaunching=$isPlayerLaunching")
-        // Launching our external player also triggers onUserLeaveHint (startActivity sets the
-        // userLeaving flag) BEFORE onPause. Skip pausing there so the RCH socket heartbeat
-        // survives playback. Real Home/leave (isPlayerLaunching == false) still pauses & clears.
-        if (browserInitComplete && !(isPlayerLaunching && keepPlayerConnection))
+        logDebug("onUserLeaveHint()")
+        if (browserInitComplete)
             browser?.apply {
                 pauseTimers()
                 clearCache(true)
@@ -558,9 +542,6 @@ class MainActivity : BaseActivity(),
     // mpv http://mpv-android.github.io/mpv-android/intent.html
     // vimu https://www.vimu.tv/player-api
     private fun handlePlayerResult(result: androidx.activity.result.ActivityResult) {
-        isPlayerLaunching = false // player closed, returning result
-        browser?.setKeepVisible(false)
-        PlaybackService.stop(this)
         val data: Intent? = result.data
         val videoUrl: String = data?.data?.toString() ?: "null"
         val resultCode = result.resultCode
@@ -1339,23 +1320,15 @@ class MainActivity : BaseActivity(),
             action = "showChannelsDialog",
             icon = R.drawable.round_link_24
         )
+        if (BuildConfig.enableUpdate) menuItems += MenuItem(
+            title = getString(R.string.update_check_title),
+            action = "checkForUpdates",
+            icon = R.drawable.round_system_update_24
+        )
         menuItems += listOf(
             MenuItem(
                 title = getString(R.string.change_url_title),
                 action = "showUrlInputDialog",
-                icon = R.drawable.round_link_24
-            ),
-            MenuItem(
-                title = getString(R.string.backup_restore_title),
-                action = "showBackupDialog",
-                icon = R.drawable.round_settings_backup_restore_24
-            ),
-            MenuItem(
-                title = getString(
-                    if (keepPlayerConnection) R.string.keep_connection_disable
-                    else R.string.keep_connection_enable
-                ),
-                action = "toggleKeepConnection",
                 icon = R.drawable.round_link_24
             ),
             MenuItem(
@@ -1380,9 +1353,11 @@ class MainActivity : BaseActivity(),
                 when (menuItems[which].action) {
                     "updateOrClose" -> {
                         if (isAndroidTV) {
-                            Scheduler.forceUpdate()
+                            updateChannelsNow()
                         }
                     }
+
+                    "checkForUpdates" -> checkForUpdatesNow()
 
                     "showChannelsDialog" -> showChannelsDialog()
 
@@ -1391,12 +1366,6 @@ class MainActivity : BaseActivity(),
                         showUrlInputDialog()
                     }
 
-                    "showBackupDialog" -> showBackupDialog()
-                    "toggleKeepConnection" -> {
-                        keepPlayerConnection = !keepPlayerConnection
-                        playerKeepConnection = keepPlayerConnection // persist to prefs
-                        showMenuDialog() // reopen so the item reflects the new state
-                    }
                     "appExit" -> appExit()
                 }
             }
@@ -1411,123 +1380,35 @@ class MainActivity : BaseActivity(),
         isMenuVisible = true
     }
 
-    // Function to handle backup all settings
-    private fun backupAllSettings() {
+    /** «Обновить каналы» из меню: раньше молчал, и не было понятно, сработало ли. */
+    private fun updateChannelsNow() {
+        App.toast(R.string.tv_channels_updating, false)
         lifecycleScope.launch {
-            dumpStorage { callback ->
-                if (callback.contains(JS_SUCCESS, true)) { // .trim().removeSurrounding("\"")
-                    val itemsCount = callback.substringAfter("$JS_SUCCESS.")
-                        .substringBefore("items")
-                        .trim()
-                        .toIntOrNull() ?: 0
-                    // Proceed with saving settings if dumpStorage successful
-                    if (backupSettings(Prefs.APP_PREFERENCES) &&
-                        backupSettings(Prefs.STORAGE_PREFERENCES) &&
-                        validateStorageBackup(itemsCount)
-                    ) {
-                        App.toast(getString(R.string.settings_saved_toast, Backup.DIR.toString()))
-                    } else {
-                        App.toast(R.string.settings_save_fail)
-                    }
-                } else {
-                    App.toast(R.string.settings_save_fail)
-                }
+            val result = withContext(Dispatchers.IO) {
+                Scheduler.updateContent(sync = false, force = true)
             }
-        }
-    }
-
-    // Function to handle restore app settings
-    private fun restoreAppSettings() {
-        if (loadFromBackup(Prefs.APP_PREFERENCES)) {
-            App.toast(R.string.settings_restored)
-            recreate()
-        } else {
-            App.toast(R.string.settings_rest_fail)
-        }
-    }
-
-    // Function to handle restore Lampa settings
-    private fun restoreLampaSettings() {
-        lifecycleScope.launch {
-            if (loadFromBackup(Prefs.STORAGE_PREFERENCES)) {
-                restoreStorage { callback ->
-                    if (callback.contains(JS_SUCCESS, true)) {
-                        App.toast(R.string.settings_restored)
-                        recreate()
-                    } else {
-                        App.toast(R.string.settings_rest_fail)
-                    }
+            App.toast(
+                when (result) {
+                    true -> R.string.tv_channels_updated
+                    false -> R.string.tv_channels_update_failed
+                    null -> R.string.tv_channels_update_busy
                 }
-            } else {
-                App.toast(R.string.settings_rest_fail)
-            }
-        }
-    }
-
-    // Function to handle restore default settings
-    private fun restoreDefaultSettings() {
-        clearStorage()
-        appPrefs.edit { clear() }
-        defPrefs.edit { clear() }
-        lastPlayedPrefs.edit { clear() }
-        // clearUrlHistory()
-        recreate()
-    }
-
-    private fun showBackupDialog() {
-
-        // Define menu items
-        val menuItems = listOf(
-            MenuItem(
-                title = getString(R.string.backup_all_title),
-                action = "backupAllSettings",
-                icon = R.drawable.round_settings_backup_restore_24
-            ),
-            MenuItem(
-                title = getString(R.string.restore_app_title),
-                action = "restoreAppSettings",
-                icon = R.drawable.round_refresh_24
-            ),
-            MenuItem(
-                title = getString(R.string.restore_storage_title),
-                action = "restoreLampaSettings",
-                icon = R.drawable.round_refresh_24
-            ),
-            MenuItem(
-                title = getString(R.string.default_setting_title),
-                action = "restoreDefaultSettings",
-                icon = R.drawable.round_close_24
             )
-        )
+        }
+    }
 
-        // Set up the adapter
-        val adapter = ImgArrayAdapter(
-            this,
-            menuItems.map { it.title }.toList(),
-            menuItems.map { it.icon }.toList()
-        )
-
-        // Configure the dialog
-        val dialog = AlertDialog.Builder(this).apply {
-            setTitle(getString(R.string.backup_restore_title))
-            setAdapter(adapter) { dialog, which ->
-                dialog.dismiss()
-                when (menuItems[which].action) {
-                    "backupAllSettings" -> backupAllSettings()
-                    "restoreAppSettings" -> restoreAppSettings()
-                    "restoreLampaSettings" -> restoreLampaSettings()
-                    "restoreDefaultSettings" -> restoreDefaultSettings()
-                }
+    /**
+     * «Проверка обновлений» из меню. Есть новая версия — тот же экран, что при запуске;
+     * нет — говорим об этом (сам экран в этом случае молча закрывается).
+     */
+    private fun checkForUpdatesNow() {
+        App.toast(R.string.update_checking, false)
+        lifecycleScope.launch {
+            when (withContext(Dispatchers.IO) { Updater.checkOrNull() }) {
+                true -> startActivity(Intent(this@MainActivity, UpdateActivity::class.java))
+                false -> App.toast(getString(R.string.update_latest, BuildConfig.VERSION_NAME))
+                null -> App.toast(R.string.update_check_failed)
             }
-        }.create()
-        // Show the dialog
-        showFullScreenDialog(dialog)
-        // Set active row
-        adapter.setSelectedItem(0)
-
-        // Check storage permissions
-        if (!PermHelpers.hasStoragePermissions(this)) {
-            PermHelpers.verifyStoragePermissions(this)
         }
     }
 
@@ -3221,22 +3102,8 @@ class MainActivity : BaseActivity(),
     private fun launchPlayer(intent: Intent) {
         try {
             debugLogIntentData(TAG, intent)
-            // Mark that the upcoming onPause() is caused by launching our external player,
-            // so we can keep the WebView JS timers (RCH socket heartbeat) alive.
-            isPlayerLaunching = true
-            // Keep the page reported as visible to the web engine so Lampa doesn't pause its
-            // own timers on DOM visibilitychange while the player is in front.
-            if (keepPlayerConnection) {
-                browser?.setKeepVisible(true)
-                // Foreground service keeps the process out of the OEM/Android background
-                // freezer so the WebView RCH socket survives while the player is on top.
-                PlaybackService.start(this)
-            }
             resultLauncher.launch(intent)
         } catch (e: Exception) {
-            isPlayerLaunching = false // no player launched -> onPause won't be a player launch
-            browser?.setKeepVisible(false)
-            PlaybackService.stop(this)
             logDebug("Failed to launch player: ${e.message}")
             App.toast(R.string.no_launch_player, true)
         }

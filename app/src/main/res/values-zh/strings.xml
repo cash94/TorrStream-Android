@@ -1,9 +1,5 @@
 <resources>
     <string name="no_player_activity_found">​​未找到匹配的播放器。请从 Google Play 商店或任何其他来源安装播放器。我们推荐 Just Player、Vimu Media Player、VLC。</string>
-    <string name="keep_connection_channel">后台连接</string>
-    <string name="keep_connection_notification">播放期间保持连接</string>
-    <string name="keep_connection_enable">开启保持 socket 打开</string>
-    <string name="keep_connection_disable">关闭保持 socket 打开</string>
     <string name="no_torrent_activity_found">​​没有应用程序可以打开 torrent 链接。请安装 TorrServe 或任何其他支持 torrent 的应用程序。</string>
     <string name="no_launch_player">所选播放器不支持该视频</string>
     <string name="invalid_url">请输入一个有效的网址，例如：\nhttp://torrstream.online</string>
@@ -89,20 +85,20 @@
     <string name="update_chan_title">更新渠道和推荐</string>
     <string name="update_home_title">更新建议</string>
     <string name="tv_channels_title">主屏幕频道</string>
+    <string name="update_check_title">检查更新</string>
+    <string name="update_checking">正在检查更新…</string>
+    <string name="update_latest">已是最新版本（%s）</string>
+    <string name="update_check_failed">无法检查更新，请检查网络连接</string>
+    <string name="tv_channels_updating">正在更新频道…</string>
+    <string name="tv_channels_updated">频道已更新</string>
+    <string name="tv_channels_update_failed">无法更新频道，请检查服务器地址</string>
+    <string name="tv_channels_update_busy">频道正在更新中</string>
     <string name="tv_channels_enable_in_launcher">请在主屏幕设置的“自定义频道”中启用频道</string>
     <string name="tv_channels_gtv_title">Google TV 频道：最多 %1$d 个类别</string>
     <string name="tv_channels_gtv_limit">最多可选择 %1$d 个类别</string>
-    <string name="backup_restore_title">设置备份和恢复 恢复</string>
-    <string name="backup_all_title">TorrStream 设置备份</string>
-    <string name="restore_app_title">恢复应用程序首选项</string>
-    <string name="restore_storage_title">恢复 TorrStream 设置</string>
-    <string name="default_setting_title">加载默认设置</string>
-    <string name="change_note">此操作可以将 TorrStream 设置重置为其默认值。 在此更改之前，建议对您的设置进行备份！</string>
-    <string name="settings_saved_toast">所有设置已保存到 %s</string>
-    <string name="settings_save_fail">无法备份设置</string>
+    <string name="change_note">此操作可能会将 TorrStream 设置重置为默认值。</string>
     <string name="settings_migrate_fail">无法迁移设置</string>
     <string name="settings_rest_fail">无法恢复设置</string>
-    <string name="settings_restored">设置已恢复</string>
     <string name="migrate">迁移</string>
     <!--App Errors-->
     <string name="app_crash_title">抱歉给您带来不便</string>

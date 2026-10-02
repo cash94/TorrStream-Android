@@ -68,7 +68,13 @@ object Updater {
         }
     }
 
-    fun check(): Boolean {
+    fun check(): Boolean = checkOrNull() == true
+
+    /**
+     * true — есть версия новее, false — стоит последняя, null — GitHub не ответил.
+     * Меню «Проверка обновлений» различает последние два случая, автопроверке при запуске всё равно.
+     */
+    fun checkOrNull(): Boolean? {
         try {
             val url = URL(RELEASE_LINK)
             val connection = if (RELEASE_LINK.startsWith("https"))
@@ -78,7 +84,7 @@ object Updater {
             connection?.connect()
             val body = connection?.inputStream?.use {
                 it.bufferedReader(Charset.defaultCharset()).readText()
-            } ?: return false
+            } ?: return null
             releases = getJson(body, Releases::class.java)
             releases?.let {
                 it.forEach { rel ->
@@ -93,7 +99,7 @@ object Updater {
             return false
         } catch (e: Exception) {
             e.printStackTrace()
-            return false
+            return null
         }
     }
 

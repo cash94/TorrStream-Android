@@ -15,6 +15,7 @@ import android.webkit.JsResult
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebView.setWebContentsDebuggingEnabled
@@ -216,6 +217,13 @@ class SysView(override val mainActivity: MainActivity, override val viewResId: I
                 }
             }
 
+            // Картинки TMDB — из дискового кэша (ImageCache), остальное как обычно
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest
+            ): WebResourceResponse? =
+                ImageCache.intercept(request) ?: super.shouldInterceptRequest(view, request)
+
             @SuppressLint("WebViewClientOnReceivedSslError")
             override fun onReceivedSslError(
                 view: WebView?,
@@ -290,10 +298,6 @@ class SysView(override val mainActivity: MainActivity, override val viewResId: I
 
     override fun clearCache(includeDiskFiles: Boolean) {
         browser?.clearCache(includeDiskFiles)
-    }
-
-    override fun setKeepVisible(keep: Boolean) {
-        (browser as? LampaWebView)?.keepVisible = keep
     }
 
     override fun destroy() {

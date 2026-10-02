@@ -1,9 +1,5 @@
 <resources>
     <string name="no_player_activity_found">Подходящего мультимедиа-плеера не найдено. Пожалуйста, установите плеер из Google Play Store или любого другого источника. Мы рекомендуем Just Player, Vimu Media Player, VLC.</string>
-    <string name="keep_connection_channel">Фоновое соединение</string>
-    <string name="keep_connection_notification">Соединение поддерживается во время просмотра</string>
-    <string name="keep_connection_enable">Включить удержание сокета</string>
-    <string name="keep_connection_disable">Выключить удержание сокета</string>
     <string name="no_torrent_activity_found">Нет приложения для открытия торрент-ссылок. Пожалуйста, установите TorrServe или любое другое приложение, работающее с торрентами.</string>
     <string name="no_launch_player">TorrStream: Выбранный плеер не поддерживает воспроизведение этого видео</string>
     <string name="invalid_url">Введите корректный адрес сайта, например:\nhttp://torrstream.online</string>
@@ -89,20 +85,20 @@
     <string name="update_chan_title">Обновить каналы Android TV</string>
     <string name="update_home_title">Обновить ТВ-рекомендации</string>
     <string name="tv_channels_title">Каналы на главном экране</string>
+    <string name="update_check_title">Проверка обновлений</string>
+    <string name="update_checking">Проверяю обновления…</string>
+    <string name="update_latest">Установлена последняя версия (%s)</string>
+    <string name="update_check_failed">Не удалось проверить обновления. Проверьте подключение</string>
+    <string name="tv_channels_updating">Обновляю каналы…</string>
+    <string name="tv_channels_updated">Каналы обновлены</string>
+    <string name="tv_channels_update_failed">Не удалось обновить каналы. Проверьте адрес сервера</string>
+    <string name="tv_channels_update_busy">Каналы уже обновляются</string>
     <string name="tv_channels_enable_in_launcher">Включите каналы в настройках главного экрана: «Настроить каналы»</string>
     <string name="tv_channels_gtv_title">Канал на Google TV: до %1$d категорий</string>
     <string name="tv_channels_gtv_limit">Можно выбрать не больше %1$d категорий</string>
-    <string name="backup_restore_title">Резервирование и восстановление</string>
-    <string name="backup_all_title">Сделать резервную копию всех настроек</string>
-    <string name="restore_app_title">Восстановить настройки приложения</string>
-    <string name="restore_storage_title">Восстановить настройки TorrStream</string>
-    <string name="default_setting_title">Загрузить настройки по умолчанию</string>
-    <string name="change_note">Это действие может вернуть настройки TorrStream к значениям по умолчанию. Перед изменением рекомендуется сделать резервную копию настроек!</string>
-    <string name="settings_saved_toast">Все настройки сохранены в %s</string>
-    <string name="settings_save_fail">Не удалось выполнить резервное копирование</string>
+    <string name="change_note">Это действие может вернуть настройки TorrStream к значениям по умолчанию.</string>
     <string name="settings_migrate_fail">Не удалось перенести настройки</string>
     <string name="settings_rest_fail">Не удалось восстановить настройки</string>
-    <string name="settings_restored">Настройки восстановлены</string>
     <string name="migrate">Миграция</string>
     <!--App Errors-->
     <string name="app_crash_title">Приносим извинения за неудобства</string>

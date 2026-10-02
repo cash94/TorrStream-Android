@@ -21,7 +21,6 @@ object Prefs {
     private const val APP_URL_HISTORY = "lampa_history"
     private const val APP_PLAYER = "player"
     private const val IPTV_PLAYER = "iptv_player"
-    private const val PLAYER_KEEP_CONN_KEY = "player_keep_connection"
     private const val LAMPA_SOURCE = "source"
     private const val APP_LANG = "lang"
     private const val TMDB_API_KEY = "tmdb_api_url"
@@ -73,11 +72,6 @@ object Prefs {
     var Context.tvPlayer: String?
         get() = appPrefs.getString(IPTV_PLAYER, "")
         set(player) = appPrefs.edit { putString(IPTV_PLAYER, player) }
-
-    // Keep the RCH socket alive while an external player is in front (default off)
-    var Context.playerKeepConnection: Boolean
-        get() = appPrefs.getBoolean(PLAYER_KEEP_CONN_KEY, false)
-        set(value) = appPrefs.edit { putBoolean(PLAYER_KEEP_CONN_KEY, value) }
 
     var Context.lampaSource: String
         get() = appPrefs.getString(LAMPA_SOURCE, "tmdb") ?: "tmdb"

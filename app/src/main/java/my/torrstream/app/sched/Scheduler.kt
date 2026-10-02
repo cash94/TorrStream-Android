@@ -125,18 +125,20 @@ object Scheduler {
      *
      * @param sync Whether to update TV channels sequentially or in parallel.
      * @param force Reload channel cards even if they were refreshed recently.
+     * @return channels are up to date (true), update failed (false), another update is running (null).
      */
     @RequiresApi(Build.VERSION_CODES.KITKAT)
-    fun updateContent(sync: Boolean, force: Boolean = false) {
+    fun updateContent(sync: Boolean, force: Boolean = false): Boolean? {
         if (!isUpdate.compareAndSet(false, true))
-            return // Early return if update is already running
+            return null // Early return if update is already running
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (BuildConfig.DEBUG) Log.d("Scheduler", "updateContent call WatchNext.resyncAll()")
                 WatchNext.resyncAll()
                 if (BuildConfig.DEBUG) Log.d("Scheduler", "updateContent call Channels.update(force = $force)")
-                Channels.update(force)
+                return Channels.update(force)
             }
+            return true
         } finally {
             isUpdate.set(false)
         }
