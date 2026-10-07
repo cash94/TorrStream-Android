@@ -25,6 +25,7 @@ import my.torrstream.app.MainActivity
 import my.torrstream.app.R
 import my.torrstream.app.helpers.Helpers.isTvContentProviderAvailable
 import my.torrstream.app.helpers.Prefs.appUrl
+import my.torrstream.app.helpers.ServerCookies
 import my.torrstream.app.net.HttpHelper
 
 /**
@@ -521,7 +522,10 @@ object Channels {
     private val client by lazy { HttpHelper.getOkHttpClient(15000) }
 
     private fun getJson(url: String): JSONObject? {
-        val request = Request.Builder().url(url).build()
+        // Cookie входа из WebView: при включённом на сервере входе без неё 401
+        val builder = Request.Builder().url(url)
+        ServerCookies.forUrl(url)?.let { builder.header("Cookie", it) }
+        val request = builder.build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 if (BuildConfig.DEBUG) Log.d(TAG, "$url → ${response.code()}")

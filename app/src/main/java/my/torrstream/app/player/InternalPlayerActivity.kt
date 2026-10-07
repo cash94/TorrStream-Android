@@ -32,6 +32,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import my.torrstream.app.helpers.ServerCookies
 import java.net.URL
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -1090,6 +1091,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 requestMethod = "GET"
                 connectTimeout = 8_000
                 readTimeout = 8_000
+                ServerCookies.forUrl(url.toString())?.let { setRequestProperty("Cookie", it) }
             }
             if (connection.responseCode !in 200..299) return emptyList()
             val body = connection.inputStream.bufferedReader().use { it.readText() }
@@ -1300,6 +1302,8 @@ class InternalPlayerActivity : AppCompatActivity() {
                 readTimeout = 8_000
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
+                // Вход на сервер (cookie WebView): при включённом входе без неё 401
+                ServerCookies.forUrl(endpoint)?.let { setRequestProperty("Cookie", it) }
             }
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
 
