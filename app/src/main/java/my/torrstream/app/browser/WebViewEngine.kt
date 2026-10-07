@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Process
 import android.os.StatFs
 import android.util.Log
+import android.webkit.WebView
 import androidx.core.content.edit
 import androidx.webkit.WebViewCompat
 import com.norman.webviewup.lib.WebViewReplace
@@ -82,6 +83,7 @@ object WebViewEngine {
     )
 
     private const val ENGINES_DIR = "webview_engines"
+    private const val DATA_SUFFIX = "engine"
     private const val APK_NAME = "base.apk"
     private const val LIBS_DIR = "libs"
     private const val READY_MARK = "ready"
@@ -167,6 +169,7 @@ object WebViewEngine {
         // нативной библиотеки движка) так и останется посчитанным
         setAttempts(ctx, attempts + 1)
         try {
+            useOwnDataDirectory(ctx)
             when (sel.kind) {
                 KIND_PACKAGE -> {
                     val info = ctx.packageManager.getPackageInfo(sel.packageName ?: "", 0)
@@ -197,6 +200,26 @@ object WebViewEngine {
                 t.message ?: t.javaClass.simpleName,
             )
         }
+    }
+
+    /**
+     * Своя папка данных для сторонних движков (app_webview_engine вместо app_webview).
+     * WebView, увидев данные от более новой версии, стирает их целиком: при возврате на
+     * системный Chromium 66 пропадали бы настройки Lampa (localStorage) и cookie входа.
+     * Теперь системная папка остаётся нетронутой, а при первом включении стороннего движка
+     * её содержимое копируется в его папку — настройки переезжают вместе с пользователем.
+     * Вызывать до первого WebView в процессе; до Android 9 суффикса нет — папка общая.
+     */
+    private fun useOwnDataDirectory(ctx: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        val dataDir = File(ctx.applicationInfo.dataDir)
+        val system = File(dataDir, "app_webview")
+        val own = File(dataDir, "app_webview_$DATA_SUFFIX")
+        if (!own.exists() && system.isDirectory) {
+            runCatching { system.copyRecursively(own, overwrite = true) }
+                .onFailure { Log.w(TAG, "Copying WebView data failed", it) }
+        }
+        WebView.setDataDirectorySuffix(DATA_SUFFIX)
     }
 
     /** MainActivity открылась с подменённым движком — ещё одна попытка дойти до страницы. */

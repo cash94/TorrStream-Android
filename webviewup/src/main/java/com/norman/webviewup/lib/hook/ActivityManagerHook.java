@@ -107,6 +107,17 @@ public class ActivityManagerHook extends BinderHook {
             }
 
             @Override
+            protected Object bindService(Object... args) {
+                // Android ≤ 9 (TorrStream): аргументы те же, что у настоящего bindService,
+                // адаптер только снимает BIND_EXTERNAL_SERVICE — заглушка не внешняя служба
+                Intent redirectedIntent = findAndRedirectIntent(args);
+                if (redirectedIntent != null) {
+                    return callBindServiceOnRealAM(args);
+                }
+                return invoke();
+            }
+
+            @Override
             protected Object bindServiceInstance(Object... args) {
                 debugTrace("H1", "bindServiceInstance", "intercept", summarizeArgs(args));
                 Intent redirectedIntent = findAndRedirectIntent(args);

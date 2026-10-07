@@ -1,7 +1,7 @@
 // WebViewUpgrade (github.com/JonaNorman/WebViewUpgrade, Apache-2.0) — модуль core из
 // исходников, коммит 5a5a7d1. На Maven Central лежит только 0.1.0 от апреля 2024 года,
 // без поддержки многопроцессного WebView (рендерер в отдельном процессе), который на
-// Android 8+ включён почти везде. Код библиотеки не менялся — только эта сборка.
+// Android 8+ включён почти везде. Изменения в коде библиотеки — в README.md рядом.
 plugins {
     id 'com.android.library'
 }

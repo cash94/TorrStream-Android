@@ -29,4 +29,13 @@ public abstract class ActivityManagerProxy extends RuntimeProxy {
      */
     @Method(value = "bindServiceInstance", fuzzy = true)
     protected abstract Object bindServiceInstance(Object... args);
+
+    /**
+     * Android 9 и ниже: bindIsolatedService ещё нет, Chromium поднимает рендерер обычным
+     * bindService (через Context.bindServiceAsUser). Без этого перехвата запрос уходил в
+     * систему к службе пакета, которого на устройстве нет, и страница не загружалась.
+     * Добавлено в TorrStream, в исходной библиотеке этого нет.
+     */
+    @Method(value = "bindService", fuzzy = true)
+    protected abstract Object bindService(Object... args);
 }
