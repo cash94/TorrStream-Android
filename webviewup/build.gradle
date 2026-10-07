@@ -1,0 +1,26 @@
+// WebViewUpgrade (github.com/JonaNorman/WebViewUpgrade, Apache-2.0) — модуль core из
+// исходников, коммит 5a5a7d1. На Maven Central лежит только 0.1.0 от апреля 2024 года,
+// без поддержки многопроцессного WebView (рендерер в отдельном процессе), который на
+// Android 8+ включён почти везде. Код библиотеки не менялся — только эта сборка.
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'com.norman.webviewup.lib'
+    //noinspection GradleDependency
+    compileSdk 34
+
+    defaultConfig {
+        minSdkVersion 21
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation 'androidx.annotation:annotation:1.7.1'
+}

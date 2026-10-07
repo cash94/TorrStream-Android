@@ -88,7 +88,8 @@ object Updater {
             releases = getJson(body, Releases::class.java)
             releases?.let {
                 it.forEach { rel ->
-                    if (isNewerThanCurrent(rel.tag_name)) {
+                    // Пререлизы — тестовые сборки (тег test-*), всем их не предлагаем
+                    if (!rel.prerelease && isNewerThanCurrent(rel.tag_name)) {
                         newVersion = rel
                         connection.disconnect()
                         return true
@@ -114,7 +115,7 @@ object Updater {
     fun getOverview(): Spanned {
         var ret = ""
 
-        releases?.forEach { rel ->
+        releases?.filterNot { it.prerelease }?.forEach { rel ->
             // body у релиза без описания приходит null — раньше здесь падал весь экран
             val notes = rel.body.orEmpty().replace("\r\n", "<br/>").replace("\n", "<br/>")
             if (isNewerThanCurrent(rel.tag_name)) {

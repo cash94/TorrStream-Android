@@ -128,6 +128,14 @@
                     android:scheme="lampa" />
             </intent-filter>
         </activity>
+        <!-- Перезапуск после смены движка WebView (browser/WebViewEngine.restartApp) -->
+        <activity
+            android:name=".browser.RestartActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:process=":restart"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <activity
             android:name=".UpdateActivity"
             android:excludeFromRecents="true"

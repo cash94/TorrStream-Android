@@ -141,4 +141,27 @@
     <string name="net_error_network_changed">Мережа змінена</string>
     <string name="net_error_blocked_by_admin">Заблоковано адміністратором</string>
     <string name="net_error_blocked_enrollment_check">Очікується перевірка реєстрації</string>
+    <!-- WebView engine (browser/WebViewEngine) -->
+    <string name="webview_engine_menu">Змінити рушій WebView</string>
+    <string name="webview_engine_title">Рушій WebView (зараз Chromium %s)</string>
+    <string name="webview_engine_loading">Завантажую список рушіїв…</string>
+    <string name="webview_engine_catalog_offline">Список рушіїв у мережі недоступний — показую вбудований</string>
+    <string name="webview_engine_system">Системний: %s</string>
+    <string name="webview_engine_system_short">Системний WebView</string>
+    <string name="webview_engine_installed">Встановлений: %s</string>
+    <string name="webview_engine_downloaded">%s · завантажено</string>
+    <string name="webview_engine_download">%s · завантажити</string>
+    <string name="webview_engine_downloading">Завантажую %1$s… %2$d%%</string>
+    <string name="webview_engine_unpacking">Розпаковую %s…</string>
+    <string name="webview_engine_download_failed">Не вдалося завантажити рушій: %s</string>
+    <string name="webview_engine_no_space">Замало вільного місця, потрібно близько %d МБ</string>
+    <string name="webview_engine_bad_apk">Цей файл не підходить як рушій WebView для цього пристрою</string>
+    <string name="webview_engine_restart_title">Потрібен перезапуск</string>
+    <string name="webview_engine_restart_message">%s запрацює після перезапуску застосунку. Перезапустити зараз?</string>
+    <string name="webview_engine_restart">Перезапустити</string>
+    <string name="webview_engine_later">Пізніше</string>
+    <string name="webview_engine_failed">Не вдалося увімкнути %1$s (%2$s). Працює системний WebView.</string>
+    <string name="webview_engine_crashed">%s кілька разів поспіль не запустився. Повернуто системний WebView.</string>
+    <string name="webview_engine_clear">Видалити завантажені</string>
+    <string name="webview_engine_cleared">Завантажені рушії видалено, звільнено %d МБ</string>
 </resources>

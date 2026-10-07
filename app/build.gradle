@@ -22,7 +22,10 @@ def getVersionName = { ->
     try {
         def stdout = new ByteArrayOutputStream()
         exec {
-            commandLine 'git', 'describe', '--tags', '--dirty'
+            // Только теги релизов: тестовые сборки (тег test-*) получают версию вида
+            // 1.1.4-2-gabcdef, а не имя своего тега — иначе Updater прочёл бы
+            // «test-…» как версию 0 и предлагал «обновиться» на последний релиз
+            commandLine 'git', 'describe', '--tags', '--dirty', '--match', 'v*'
             standardOutput = stdout
         }
         return stdout.toString().trim().replaceFirst("^v", "")
@@ -141,6 +144,8 @@ dependencies {
     //noinspection GradleDependency 2.0.4 for AGP 7.4
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
     implementation fileTree(dir: 'libs', include: ['*.jar'])
+    // Смена движка WebView внутри приложения (browser/WebViewEngine.kt)
+    implementation project(':webviewup')
 
     def actKtxVer = '1.8.0' // 1.8.0 - last api16 compatible
     //noinspection GradleDependency

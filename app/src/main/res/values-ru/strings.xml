@@ -141,4 +141,27 @@
     <string name="net_error_network_changed">Сеть изменена</string>
     <string name="net_error_blocked_by_admin">Заблокировано администратором</string>
     <string name="net_error_blocked_enrollment_check">Ожидается проверка регистрации</string>
+    <!-- WebView engine (browser/WebViewEngine) -->
+    <string name="webview_engine_menu">Сменить движок WebView</string>
+    <string name="webview_engine_title">Движок WebView (сейчас Chromium %s)</string>
+    <string name="webview_engine_loading">Загружаю список движков…</string>
+    <string name="webview_engine_catalog_offline">Список движков в сети недоступен — показываю встроенный</string>
+    <string name="webview_engine_system">Системный: %s</string>
+    <string name="webview_engine_system_short">Системный WebView</string>
+    <string name="webview_engine_installed">Установленный: %s</string>
+    <string name="webview_engine_downloaded">%s · скачан</string>
+    <string name="webview_engine_download">%s · скачать</string>
+    <string name="webview_engine_downloading">Скачиваю %1$s… %2$d%%</string>
+    <string name="webview_engine_unpacking">Распаковываю %s…</string>
+    <string name="webview_engine_download_failed">Не удалось скачать движок: %s</string>
+    <string name="webview_engine_no_space">Мало свободного места, нужно около %d МБ</string>
+    <string name="webview_engine_bad_apk">Этот файл не подходит как движок WebView для этого устройства</string>
+    <string name="webview_engine_restart_title">Нужен перезапуск</string>
+    <string name="webview_engine_restart_message">%s заработает после перезапуска приложения. Перезапустить сейчас?</string>
+    <string name="webview_engine_restart">Перезапустить</string>
+    <string name="webview_engine_later">Позже</string>
+    <string name="webview_engine_failed">Не удалось включить %1$s (%2$s). Работает системный WebView.</string>
+    <string name="webview_engine_crashed">%s несколько раз подряд не запустился. Вернул системный WebView.</string>
+    <string name="webview_engine_clear">Удалить скачанные</string>
+    <string name="webview_engine_cleared">Скачанные движки удалены, освобождено %d МБ</string>
 </resources>

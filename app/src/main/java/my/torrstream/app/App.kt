@@ -15,6 +15,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.norman.webviewup.lib.util.ProcessUtils
+import my.torrstream.app.browser.WebViewEngine
 import my.torrstream.app.helpers.Helpers.isConnected
 import my.torrstream.app.helpers.Prefs.appLang
 import my.torrstream.app.helpers.Updater
@@ -94,6 +96,11 @@ class App : MultiDexApplication() {
         super.onCreate()
         // setup applicationContext
         appContext = applicationContext.setLanguage()
+        // Процессы-заглушки рендерера WebView (:sandboxed_process*, их заводит библиотека
+        // WebViewUpgrade) и :restart — служебные: ни проверки обновлений, ни TMDB им не нужны
+        if (!ProcessUtils.isMainProcess(this)) return
+        // Свой движок WebView — до первого WebView в процессе, иначе подменить уже нельзя
+        WebViewEngine.applyOnStartup(this)
         // ensure resources are properly initialized
         resources
 

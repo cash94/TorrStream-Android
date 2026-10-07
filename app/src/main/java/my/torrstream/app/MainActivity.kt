@@ -68,6 +68,7 @@ import org.json.JSONException
 import org.json.JSONObject
 import my.torrstream.app.browser.Browser
 import my.torrstream.app.browser.SysView
+import my.torrstream.app.browser.WebViewEngine
 //import my.torrstream.app.channels.ChannelManager.getChannelDisplayName
 //import my.torrstream.app.channels.WatchNext
 import my.torrstream.app.channels.Channels
@@ -252,6 +253,11 @@ class MainActivity : BaseActivity(),
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WebViewEngine.onActivityStart(this)
+        WebViewEngine.startupError?.let {
+            WebViewEngine.startupError = null
+            App.toast(it)
+        }
         LAMPA_URL = appUrl
         SELECTED_PLAYER = appPlayer
         logDebug("onCreate LAMPA_URL: $LAMPA_URL")
@@ -384,6 +390,8 @@ class MainActivity : BaseActivity(),
         if (view.visibility != View.VISIBLE) {
             view.visibility = View.VISIBLE
         }
+        // Страница открылась — выбранный движок WebView рабочий
+        WebViewEngine.markHealthy(this)
         // Switch Loader (Note it control delayedVoidJsFunc)
         loaderView.visibility = View.GONE
         findViewById<View>(R.id.loaderMark)?.clearAnimation()
@@ -1329,6 +1337,11 @@ class MainActivity : BaseActivity(),
         )
         menuItems += listOf(
             MenuItem(
+                title = getString(R.string.webview_engine_menu),
+                action = "showWebViewEngineDialog",
+                icon = R.drawable.ic_player_settings
+            ),
+            MenuItem(
                 title = getString(R.string.change_url_title),
                 action = "showUrlInputDialog",
                 icon = R.drawable.round_link_24
@@ -1367,6 +1380,8 @@ class MainActivity : BaseActivity(),
 
                     "showChannelsDialog" -> showChannelsDialog()
 
+                    "showWebViewEngineDialog" -> showWebViewEngineDialog()
+
                     "showUrlInputDialog" -> {
                         App.toast(R.string.change_note)
                         showUrlInputDialog()
@@ -1384,6 +1399,166 @@ class MainActivity : BaseActivity(),
         // Show full screen dialog
         showFullScreenDialog(dialog)
         isMenuVisible = true
+    }
+
+    /**
+     * «Движок WebView»: системный, установленный пакет-провайдер или скачанный из каталога
+     * (browser/WebViewEngine). Новый выбор вступает в силу после перезапуска приложения.
+     */
+    private fun showWebViewEngineDialog() {
+        App.toast(R.string.webview_engine_loading, false)
+        lifecycleScope.launch {
+            val (catalog, online) = try {
+                WebViewEngine.loadCatalog(this@MainActivity)
+            } catch (e: Exception) {
+                Log.e(TAG, "WebView engine catalog", e)
+                emptyList<WebViewEngine.CatalogEntry>() to false
+            }
+            if (!online) App.toast(R.string.webview_engine_catalog_offline, false)
+            val installed = withContext(Dispatchers.IO) {
+                WebViewEngine.installedEngines(this@MainActivity)
+            }
+            val current = WebViewEngine.selection(this@MainActivity)
+
+            val labels = mutableListOf<String>()
+            val choices = mutableListOf<() -> Unit>()
+            var checked = 0
+
+            labels += getString(
+                R.string.webview_engine_system,
+                WebViewEngine.systemEngineLabel(this@MainActivity)
+            )
+            choices += { applyWebViewEngine(WebViewEngine.Selection(WebViewEngine.KIND_SYSTEM)) }
+
+            installed.forEach { engine ->
+                if (current.kind == WebViewEngine.KIND_PACKAGE && current.packageName == engine.packageName)
+                    checked = labels.size
+                labels += getString(R.string.webview_engine_installed, engine.label)
+                choices += {
+                    applyWebViewEngine(
+                        WebViewEngine.Selection(
+                            WebViewEngine.KIND_PACKAGE,
+                            packageName = engine.packageName,
+                            label = engine.label
+                        )
+                    )
+                }
+            }
+
+            catalog.forEach { entry ->
+                if (current.kind == WebViewEngine.KIND_FILE && current.fileId == entry.id)
+                    checked = labels.size
+                val downloaded = WebViewEngine.isDownloaded(this@MainActivity, entry)
+                labels += getString(
+                    if (downloaded) R.string.webview_engine_downloaded
+                    else R.string.webview_engine_download,
+                    entry.label
+                )
+                val selection = WebViewEngine.Selection(
+                    WebViewEngine.KIND_FILE,
+                    fileId = entry.id,
+                    label = entry.label
+                )
+                choices += {
+                    if (downloaded) applyWebViewEngine(selection)
+                    else downloadWebViewEngine(entry, selection)
+                }
+            }
+
+            // Что работает прямо сейчас — по User-Agent, там настоящая версия Chromium
+            val running = Regex("Chrome/([\\d.]+)")
+                .find(browser?.getUserAgentString().orEmpty())?.groupValues?.get(1)
+                ?: "?"
+            val dialog = AlertDialog.Builder(this@MainActivity).apply {
+                setTitle(getString(R.string.webview_engine_title, running))
+                setSingleChoiceItems(labels.toTypedArray(), checked) { d, which ->
+                    d.dismiss()
+                    if (which != checked) choices[which]()
+                }
+                setNegativeButton(android.R.string.cancel, null)
+                setNeutralButton(R.string.webview_engine_clear) { _, _ ->
+                    lifecycleScope.launch {
+                        val freed = withContext(Dispatchers.IO) {
+                            WebViewEngine.deleteDownloads(this@MainActivity)
+                        }
+                        App.toast(getString(R.string.webview_engine_cleared, freed))
+                    }
+                }
+                setOnDismissListener {
+                    isMenuVisible = false
+                    showFab(true)
+                }
+            }.create()
+            showFullScreenDialog(dialog)
+            isMenuVisible = true
+        }
+    }
+
+    private fun downloadWebViewEngine(
+        entry: WebViewEngine.CatalogEntry,
+        selection: WebViewEngine.Selection
+    ) {
+        val pad = dp2px(this, 24f)
+        val status = TextView(this).apply {
+            text = getString(R.string.webview_engine_downloading, entry.label, 0)
+        }
+        val bar = LinearProgressIndicator(this).apply {
+            max = 100
+            setPadding(0, pad / 2, 0, 0)
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+            addView(status)
+            addView(bar)
+        }
+        lateinit var job: kotlinx.coroutines.Job
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.webview_engine_menu)
+            .setView(content)
+            .setCancelable(false)
+            .setNegativeButton(android.R.string.cancel) { _, _ -> job.cancel() }
+            .create()
+        showFullScreenDialog(dialog)
+        job = lifecycleScope.launch {
+            try {
+                WebViewEngine.download(this@MainActivity, entry) { prc ->
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        if (prc < 0) {
+                            status.text = getString(R.string.webview_engine_unpacking, entry.label)
+                            bar.isIndeterminate = true
+                        } else {
+                            status.text = getString(R.string.webview_engine_downloading, entry.label, prc)
+                            bar.setProgressCompat(prc, true)
+                        }
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "WebView engine download", e)
+                App.toast(getString(R.string.webview_engine_download_failed, e.message ?: e.javaClass.simpleName))
+                return@launch
+            } finally {
+                dialog.dismiss()
+            }
+            applyWebViewEngine(selection)
+        }
+    }
+
+    /** Запоминает движок и предлагает перезапуск: в работающем процессе его не сменить. */
+    private fun applyWebViewEngine(selection: WebViewEngine.Selection) {
+        WebViewEngine.select(this, selection)
+        val name = selection.label.ifEmpty { getString(R.string.webview_engine_system_short) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.webview_engine_restart_title)
+            .setMessage(getString(R.string.webview_engine_restart_message, name))
+            .setPositiveButton(R.string.webview_engine_restart) { _, _ ->
+                WebViewEngine.restartApp(this)
+            }
+            .setNegativeButton(R.string.webview_engine_later, null)
+            .create()
+        showFullScreenDialog(dialog)
     }
 
     /** «Обновить каналы» из меню: раньше молчал, и не было понятно, сработало ли. */

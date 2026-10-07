@@ -145,4 +145,27 @@
     <string name="net_error_network_changed">Network changed</string>
     <string name="net_error_blocked_by_admin">Blocked by administrator</string>
     <string name="net_error_blocked_enrollment_check">Enrollment check pending</string>
+    <!-- WebView engine (browser/WebViewEngine) -->
+    <string name="webview_engine_menu">Change WebView engine</string>
+    <string name="webview_engine_title">WebView engine (running Chromium %s)</string>
+    <string name="webview_engine_loading">Loading the list of engines…</string>
+    <string name="webview_engine_catalog_offline">Engine list is unavailable online — showing the built-in one</string>
+    <string name="webview_engine_system">System: %s</string>
+    <string name="webview_engine_system_short">System WebView</string>
+    <string name="webview_engine_installed">Installed: %s</string>
+    <string name="webview_engine_downloaded">%s · downloaded</string>
+    <string name="webview_engine_download">%s · download</string>
+    <string name="webview_engine_downloading">Downloading %1$s… %2$d%%</string>
+    <string name="webview_engine_unpacking">Unpacking %s…</string>
+    <string name="webview_engine_download_failed">Could not download the engine: %s</string>
+    <string name="webview_engine_no_space">Not enough free space, about %d MB is needed</string>
+    <string name="webview_engine_bad_apk">This file is not a WebView engine for this device</string>
+    <string name="webview_engine_restart_title">Restart required</string>
+    <string name="webview_engine_restart_message">%s will be used after the app restarts. Restart now?</string>
+    <string name="webview_engine_restart">Restart</string>
+    <string name="webview_engine_later">Later</string>
+    <string name="webview_engine_failed">Could not enable %1$s (%2$s). The system WebView is used.</string>
+    <string name="webview_engine_crashed">%s failed to start several times in a row. Switched back to the system WebView.</string>
+    <string name="webview_engine_clear">Delete downloaded</string>
+    <string name="webview_engine_cleared">Downloaded engines deleted, %d MB freed</string>
 </resources>

@@ -140,4 +140,27 @@
     <string name="net_error_network_changed">网络已更改</string>
     <string name="net_error_blocked_by_admin">被管理员阻止</string>
     <string name="net_error_blocked_enrollment_check">等待注册检查</string>
+    <!-- WebView engine (browser/WebViewEngine) -->
+    <string name="webview_engine_menu">更换 WebView 内核</string>
+    <string name="webview_engine_title">WebView 内核（当前 Chromium %s）</string>
+    <string name="webview_engine_loading">正在加载内核列表…</string>
+    <string name="webview_engine_catalog_offline">无法在线获取内核列表，显示内置列表</string>
+    <string name="webview_engine_system">系统：%s</string>
+    <string name="webview_engine_system_short">系统 WebView</string>
+    <string name="webview_engine_installed">已安装：%s</string>
+    <string name="webview_engine_downloaded">%s · 已下载</string>
+    <string name="webview_engine_download">%s · 下载</string>
+    <string name="webview_engine_downloading">正在下载 %1$s… %2$d%%</string>
+    <string name="webview_engine_unpacking">正在解压 %s…</string>
+    <string name="webview_engine_download_failed">内核下载失败：%s</string>
+    <string name="webview_engine_no_space">可用空间不足，大约需要 %d MB</string>
+    <string name="webview_engine_bad_apk">此文件不是适用于本设备的 WebView 内核</string>
+    <string name="webview_engine_restart_title">需要重启</string>
+    <string name="webview_engine_restart_message">重启应用后将使用 %s。现在重启吗？</string>
+    <string name="webview_engine_restart">重启</string>
+    <string name="webview_engine_later">稍后</string>
+    <string name="webview_engine_failed">无法启用 %1$s（%2$s）。正在使用系统 WebView。</string>
+    <string name="webview_engine_crashed">%s 连续多次启动失败，已切换回系统 WebView。</string>
+    <string name="webview_engine_clear">删除已下载</string>
+    <string name="webview_engine_cleared">已删除下载的内核，释放 %d MB</string>
 </resources>
