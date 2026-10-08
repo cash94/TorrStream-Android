@@ -53,7 +53,8 @@ final class BindServiceArgsAdapter {
         Method best = null;
         int bestScore = Integer.MIN_VALUE;
         for (Method m : candidates) {
-            int pc = m.getParameterCount();
+            // getParameterCount() — только с Android 8 (API 26), а сюда приходят и с 6–7
+            int pc = m.getParameterTypes().length;
             if (pc > srcLen) {
                 continue;
             }
@@ -110,7 +111,7 @@ final class BindServiceArgsAdapter {
     static Object[] adapt(@Nullable Object[] srcArgs,
                           @NonNull Method bindServiceMethod,
                           @Nullable String hostPackageName) {
-        int targetParamCount = bindServiceMethod.getParameterCount();
+        int targetParamCount = bindServiceMethod.getParameterTypes().length;
         Class<?>[] targetTypes = bindServiceMethod.getParameterTypes();
         List<Object> mutable = new ArrayList<>();
         if (srcArgs != null) {

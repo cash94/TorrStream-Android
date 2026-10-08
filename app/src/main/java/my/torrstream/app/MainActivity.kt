@@ -17,6 +17,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Build.VERSION
 import android.os.Bundle
+import android.text.format.Formatter
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
@@ -47,6 +48,7 @@ import androidx.appcompat.widget.AppCompatEditText
 import androidx.appcompat.widget.AppCompatImageButton
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.airbnb.lottie.LottieAnimationView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -67,7 +69,9 @@ import net.gotev.speech.ui.SpeechProgressView
 import org.json.JSONException
 import org.json.JSONObject
 import my.torrstream.app.browser.Browser
+import my.torrstream.app.browser.ImageCache
 import my.torrstream.app.browser.SysView
+import my.torrstream.app.browser.WebDataMigration
 import my.torrstream.app.browser.WebViewEngine
 //import my.torrstream.app.channels.ChannelManager.getChannelDisplayName
 //import my.torrstream.app.channels.WatchNext
@@ -120,6 +124,14 @@ class MainActivity : BaseActivity(),
     // Local properties
     private var browser: Browser? = null
     private var browserInitComplete = false
+
+    /**
+     * Смена движка WebView: источник, чьи данные (localStorage, IndexedDB) сейчас загружаются
+     * в новый движок (browser/WebDataMigration). Пока не null, открыта служебная страница
+     * источника, а не приложение.
+     */
+    private var engineImportOrigin: String? = null
+    private var engineImportStarted = false
     private var isMenuVisible = false
     private lateinit var loaderView: View
     private lateinit var resultLauncher: ActivityResultLauncher<Intent>
@@ -299,8 +311,18 @@ class MainActivity : BaseActivity(),
     }
 
     override fun onPause() {
-        if (browserInitComplete)
-            browser?.pauseTimers()
+        if (browserInitComplete) {
+            if (engineImportOrigin == null && WebViewEngine.switchPending(this)) {
+                // Движок сменится при следующем запуске («Позже» в диалоге) — выгружаем
+                // свежие данные: в нём продолжают работать. Таймеры WebView — после выгрузки,
+                // на паузе её колбэки могли бы не дойти
+                WebDataMigration.export(this, browser, WebViewEngine.runningKey) {
+                    if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) browser?.pauseTimers()
+                }
+            } else {
+                browser?.pauseTimers()
+            }
+        }
         super.onPause()
     }
 
@@ -325,7 +347,9 @@ class MainActivity : BaseActivity(),
         logDebug("onUserLeaveHint()")
         if (browserInitComplete)
             browser?.apply {
-                pauseTimers()
+                // Ждёт смена движка — таймеры на паузу ставит onPause, уже после выгрузки
+                // данных: на паузе скрипт выгрузки не доходил до конца
+                if (engineImportOrigin != null || !WebViewEngine.switchPending(this@MainActivity)) pauseTimers()
                 clearCache(true)
             }
         super.onUserLeaveHint()
@@ -370,19 +394,51 @@ class MainActivity : BaseActivity(),
             setUserAgentString(HttpHelper.userAgent)
             setBackgroundColor(ContextCompat.getColor(baseContext, R.color.lampa_background))
             addJavascriptInterface(AndroidJS(this@MainActivity, this), "AndroidJS")
+            addJavascriptInterface(WebDataMigration.bridge, WebDataMigration.BRIDGE)
         }
         logDebug("onBrowserInitCompleted LAMPA_URL: $LAMPA_URL")
         if (LAMPA_URL.isEmpty()) {
             logDebug("onBrowserInitCompleted showUrlInputDialog")
             showUrlInputDialog()
         } else {
+            // Движок сменили — сначала данные прежнего движка, потом приложение
+            val origin = WebDataMigration.pendingImportOrigin(this, WebViewEngine.runningKey, LAMPA_URL)
+            if (origin != null) {
+                engineImportOrigin = origin
+                App.toast(R.string.webview_engine_migrating, false)
+                browser?.loadUrl(WebDataMigration.bootUrl(origin))
+                return
+            }
             logDebug("onBrowserInitCompleted load $LAMPA_URL")
+            browser?.loadUrl(LAMPA_URL)
+        }
+    }
+
+    /**
+     * Открылась служебная страница источника — загружаем в неё данные прежнего движка и
+     * открываем приложение. Ошибка переноса приложение не задерживает: оно откроется с тем,
+     * что есть в папке нового движка.
+     */
+    private fun continueEngineImport() {
+        val origin = engineImportOrigin ?: return
+        if (engineImportStarted) return
+        engineImportStarted = true
+        WebDataMigration.runImport(this, browser, origin) { ok, retry, error ->
+            engineImportOrigin = null
+            if (!ok && !retry) App.toast(getString(R.string.webview_engine_migrate_failed, error ?: "?"))
             browser?.loadUrl(LAMPA_URL)
         }
     }
 
     override fun onBrowserPageFinished(view: ViewGroup, url: String) {
         logDebug("onBrowserPageFinished url: $url")
+        if (engineImportOrigin != null) {
+            // Служебная страница переноса данных: движок страницу открыл — он рабочий,
+            // а загрузчик остаётся на экране до приложения
+            WebViewEngine.markHealthy(this)
+            continueEngineImport()
+            return
+        }
         // Restore Lampa settings and reload if migrate flag set
         if (migrate) {
             migrateSettings()
@@ -445,7 +501,9 @@ class MainActivity : BaseActivity(),
             val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
             // Measured, not guessed: three attempts at covering the cutout changed nothing on
             // real hardware, and this says whether the window is even told there is one.
-            Log.i(
+            // displayCutout и layoutInDisplayCutoutMode — API 28: на Android 6–8.1 их вызов
+            // бросал NoSuchMethodError прямо в обработчике отступов окна
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) Log.i(
                 TAG,
                 "Insets cutout=$cutout " +
                         "systemBars=${insets.getInsets(WindowInsetsCompat.Type.systemBars())} " +
@@ -1336,6 +1394,15 @@ class MainActivity : BaseActivity(),
             icon = R.drawable.round_system_update_24
         )
         menuItems += listOf(
+            // Размер — в самом пункте: видно, есть ли что чистить, ещё до нажатия
+            MenuItem(
+                title = getString(
+                    R.string.image_cache_clear_title,
+                    Formatter.formatShortFileSize(this, ImageCache.sizeBytes())
+                ),
+                action = "clearImageCache",
+                icon = R.drawable.round_delete_24
+            ),
             MenuItem(
                 title = getString(R.string.webview_engine_menu),
                 action = "showWebViewEngineDialog",
@@ -1381,6 +1448,8 @@ class MainActivity : BaseActivity(),
                     "showChannelsDialog" -> showChannelsDialog()
 
                     "showWebViewEngineDialog" -> showWebViewEngineDialog()
+
+                    "clearImageCache" -> clearImageCache()
 
                     "showUrlInputDialog" -> {
                         App.toast(R.string.change_note)
@@ -1546,19 +1615,45 @@ class MainActivity : BaseActivity(),
         }
     }
 
-    /** Запоминает движок и предлагает перезапуск: в работающем процессе его не сменить. */
+    /**
+     * Запоминает движок и предлагает перезапуск: в работающем процессе его не сменить.
+     * Данные страницы выгружаются сразу (WebDataMigration) — новый движок загрузит их при
+     * запуске; перед перезапуском — ещё раз, чтобы попали и последние изменения.
+     */
     private fun applyWebViewEngine(selection: WebViewEngine.Selection) {
-        WebViewEngine.select(this, selection)
+        WebDataMigration.export(this, browser, WebViewEngine.runningKey) { ok ->
+            if (!ok) Log.w(TAG, "WebView data export failed, the new engine starts with its own data")
+            WebViewEngine.select(this, selection)
+            showWebViewEngineRestartDialog(selection)
+        }
+    }
+
+    private fun showWebViewEngineRestartDialog(selection: WebViewEngine.Selection) {
         val name = selection.label.ifEmpty { getString(R.string.webview_engine_system_short) }
         val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.webview_engine_restart_title)
             .setMessage(getString(R.string.webview_engine_restart_message, name))
             .setPositiveButton(R.string.webview_engine_restart) { _, _ ->
-                WebViewEngine.restartApp(this)
+                WebDataMigration.export(this, browser, WebViewEngine.runningKey) {
+                    WebViewEngine.restartApp(this)
+                }
             }
             .setNegativeButton(R.string.webview_engine_later, null)
             .create()
         showFullScreenDialog(dialog)
+    }
+
+    /** Меню → «Очистить кэш постеров»: картинки TMDB на диске (browser/ImageCache). */
+    private fun clearImageCache() {
+        lifecycleScope.launch {
+            val freed = withContext(Dispatchers.IO) { ImageCache.clear() }
+            App.toast(
+                if (freed > 0) getString(
+                    R.string.image_cache_cleared,
+                    Formatter.formatShortFileSize(this@MainActivity, freed)
+                ) else getString(R.string.image_cache_empty)
+            )
+        }
     }
 
     /** «Обновить каналы» из меню: раньше молчал, и не было понятно, сработало ли. */

@@ -117,6 +117,24 @@ object WebViewEngine {
     var activeLabel: String? = null
         private set
 
+    /**
+     * Ключ движка, который работает в этом процессе ([key]): системный, пока подмена не
+     * удалась. По нему WebDataMigration решает, из какого движка выгружены данные.
+     */
+    @Volatile
+    var runningKey: String = KIND_SYSTEM
+        private set
+
+    /** «system», «package:<имя>» или «file:<id>» — один ключ на один движок. */
+    fun key(sel: Selection): String = when (sel.kind) {
+        KIND_PACKAGE -> "$KIND_PACKAGE:${sel.packageName}"
+        KIND_FILE -> "$KIND_FILE:${sel.fileId}"
+        else -> KIND_SYSTEM
+    }
+
+    /** Выбран другой движок, он включится после перезапуска. */
+    fun switchPending(ctx: Context) = key(selection(ctx)) != runningKey
+
     /** Почему выбранный движок не включился при запуске — MainActivity покажет один раз. */
     @Volatile
     var startupError: String? = null
@@ -189,6 +207,7 @@ object WebViewEngine {
                 else -> return
             }
             activeLabel = sel.label
+            runningKey = key(sel)
             setAttempts(ctx, attempts)
             Log.i(TAG, "WebView engine: ${sel.label} (${WebViewReplace.getReplaceWebViewVersion()})")
         } catch (t: Throwable) {

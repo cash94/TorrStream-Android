@@ -164,4 +164,9 @@
     <string name="webview_engine_crashed">%s несколько раз подряд не запустился. Вернул системный WebView.</string>
     <string name="webview_engine_clear">Удалить скачанные</string>
     <string name="webview_engine_cleared">Скачанные движки удалены, освобождено %d МБ</string>
+    <string name="image_cache_clear_title">Очистить кэш постеров (%s)</string>
+    <string name="image_cache_cleared">Кэш постеров очищен, освобождено %s</string>
+    <string name="image_cache_empty">Кэш постеров пуст</string>
+    <string name="webview_engine_migrating">Переношу настройки в новый движок…</string>
+    <string name="webview_engine_migrate_failed">Не удалось перенести настройки в новый движок: %s</string>
 </resources>

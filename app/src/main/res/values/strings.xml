@@ -168,4 +168,9 @@
     <string name="webview_engine_crashed">%s failed to start several times in a row. Switched back to the system WebView.</string>
     <string name="webview_engine_clear">Delete downloaded</string>
     <string name="webview_engine_cleared">Downloaded engines deleted, %d MB freed</string>
+    <string name="image_cache_clear_title">Clear poster cache (%s)</string>
+    <string name="image_cache_cleared">Poster cache cleared, %s freed</string>
+    <string name="image_cache_empty">Poster cache is empty</string>
+    <string name="webview_engine_migrating">Moving settings to the new engine…</string>
+    <string name="webview_engine_migrate_failed">Settings could not be moved to the new engine: %s</string>
 </resources>

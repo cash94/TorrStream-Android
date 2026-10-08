@@ -172,6 +172,28 @@ object ImageCache {
         }
     }
 
+    /** Сколько занимает кэш на диске, байт. Блокирует: при первом вызове читает папку. */
+    fun sizeBytes(): Long {
+        ensureLoaded()
+        synchronized(lock) { return totalBytes }
+    }
+
+    /**
+     * Удаляет все картинки (меню → «Очистить кэш постеров»). Возвращает освобождённые байты.
+     * Картинка, которая докачивается прямо сейчас, ляжет в кэш уже после очистки — это не
+     * страшно: она и так будет нужна на экране.
+     */
+    fun clear(): Long {
+        ensureLoaded()
+        synchronized(lock) {
+            val freed = totalBytes
+            dir.listFiles()?.forEach { if (TMP_SUFFIX !in it.name) it.delete() }
+            index.clear()
+            totalBytes = 0
+            return freed
+        }
+    }
+
     private fun forget(name: String) {
         synchronized(lock) { index.remove(name)?.let { totalBytes -= it } }
     }

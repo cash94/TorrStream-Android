@@ -163,4 +163,9 @@
     <string name="webview_engine_crashed">%s 连续多次启动失败，已切换回系统 WebView。</string>
     <string name="webview_engine_clear">删除已下载</string>
     <string name="webview_engine_cleared">已删除下载的内核，释放 %d MB</string>
+    <string name="image_cache_clear_title">清除海报缓存（%s）</string>
+    <string name="image_cache_cleared">海报缓存已清除，释放 %s</string>
+    <string name="image_cache_empty">海报缓存为空</string>
+    <string name="webview_engine_migrating">正在将设置迁移到新内核…</string>
+    <string name="webview_engine_migrate_failed">无法将设置迁移到新内核：%s</string>
 </resources>

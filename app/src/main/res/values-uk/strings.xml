@@ -164,4 +164,9 @@
     <string name="webview_engine_crashed">%s кілька разів поспіль не запустився. Повернуто системний WebView.</string>
     <string name="webview_engine_clear">Видалити завантажені</string>
     <string name="webview_engine_cleared">Завантажені рушії видалено, звільнено %d МБ</string>
+    <string name="image_cache_clear_title">Очистити кеш постерів (%s)</string>
+    <string name="image_cache_cleared">Кеш постерів очищено, звільнено %s</string>
+    <string name="image_cache_empty">Кеш постерів порожній</string>
+    <string name="webview_engine_migrating">Переношу налаштування в новий рушій…</string>
+    <string name="webview_engine_migrate_failed">Не вдалося перенести налаштування в новий рушій: %s</string>
 </resources>
