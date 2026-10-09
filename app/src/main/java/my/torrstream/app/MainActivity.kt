@@ -103,6 +103,7 @@ import my.torrstream.app.helpers.Prefs.migrate
 import my.torrstream.app.helpers.Prefs.tvPlayer
 import my.torrstream.app.helpers.Prefs.urlHistory
 import my.torrstream.app.helpers.getAppVersion
+import my.torrstream.app.helpers.coverDisplayCutout
 import my.torrstream.app.helpers.hideSystemUI
 import my.torrstream.app.helpers.isAmazonDev
 import my.torrstream.app.helpers.isSafeForUse
@@ -560,29 +561,6 @@ class MainActivity : BaseActivity(),
                 // Deliver the same Escape the page's own popstate handler synthesises, so
                 // screens still close normally even if the history sentinel was lost.
                 runVoidJsFunc(JS_BACK_FALLBACK, "")
-            }
-        }
-    }
-
-    /**
-     * Окно — на весь экран, включая вырез под камеру. Окно с FLAG_FULLSCREEN (тема) в
-     * режиме выреза по умолчанию система сдвигает под вырез, и на телефоне сверху
-     * оставалась чёрная полоса по линию шторки. ALWAYS (Android 11+) пускает окно в вырез
-     * на любой стороне, SHORT_EDGES (Android 9–10) — на короткой; элементы, которые там
-     * не читались бы, страница отодвигает сама по --safe-* (applyCutoutInsets).
-     * Xiaomi и Huawei вдобавок смотрят на метаданные в манифесте (notch.config,
-     * android.notch_support).
-     */
-    private fun coverDisplayCutout() {
-        if (VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        window?.let { w ->
-            // Иначе окно само «вписывается» в отступы: вырез уходил в отступ контента, и
-            // WebView начиналась под ним, даже когда окно уже занимало весь экран
-            WindowCompat.setDecorFitsSystemWindows(w, false)
-            w.attributes = w.attributes.apply {
-                layoutInDisplayCutoutMode = if (VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }
     }

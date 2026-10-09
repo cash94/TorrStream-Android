@@ -22,6 +22,11 @@ import android.widget.SeekBar
 import android.widget.TextView
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
+import androidx.core.view.updatePadding
+import android.widget.FrameLayout
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,6 +38,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import my.torrstream.app.helpers.ServerCookies
+import my.torrstream.app.helpers.coverDisplayCutout
+import my.torrstream.app.helpers.hideSystemUI
 import java.net.URL
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -279,8 +286,13 @@ class InternalPlayerActivity : AppCompatActivity() {
         usingVlc = playerEngine == Prefs.ENGINE_VLC
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Видео — на весь экран, как и интерфейс: без этого у телефона с вырезом под
+        // камеру сбоку оставалась чёрная полоса, а системные панели поверх видео
+        coverDisplayCutout()
         setContentView(R.layout.activity_internal_player)
+        hideSystemUI()
         bindViews()
+        padControlsForCutout()
         setupControls()
 
         try {
@@ -290,6 +302,43 @@ class InternalPlayerActivity : AppCompatActivity() {
             App.toast(R.string.no_launch_player, true)
             finish()
         }
+    }
+
+    // Панели прячутся после диалогов (дорожки, серии) и свайпа от края — прячем снова
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemUI()
+    }
+
+    /**
+     * Видео занимает и область выреза, а шапка (название, статистика), часы, нижняя
+     * панель и кнопка «Пропустить» отодвигаются от камеры на её ширину — иначе их
+     * край оказывался под вырезом. Отступы из разметки — база, к ней прибавляем
+     * отступ выреза с той стороны, где он сейчас (меняется при повороте).
+     */
+    private fun padControlsForCutout() {
+        val root = findViewById<View>(R.id.playerRoot)
+        val header = intArrayOf(headerView.paddingLeft, headerView.paddingTop, headerView.paddingRight)
+        val panel = intArrayOf(controlsPanel.paddingLeft, controlsPanel.paddingRight, controlsPanel.paddingBottom)
+        val clockLp = clockView.layoutParams as FrameLayout.LayoutParams
+        val clock = intArrayOf(clockLp.topMargin, clockLp.marginEnd)
+        val skipLp = skipContainer.layoutParams as FrameLayout.LayoutParams
+        val skip = intArrayOf(skipLp.marginEnd, skipLp.bottomMargin)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            headerView.updatePadding(left = header[0] + cut.left, top = header[1] + cut.top, right = header[2] + cut.right)
+            controlsPanel.updatePadding(left = panel[0] + cut.left, right = panel[1] + cut.right, bottom = panel[2] + cut.bottom)
+            clockView.updateLayoutParams<FrameLayout.LayoutParams> {
+                topMargin = clock[0] + cut.top
+                marginEnd = clock[1] + cut.right
+            }
+            skipContainer.updateLayoutParams<FrameLayout.LayoutParams> {
+                marginEnd = skip[0] + cut.right
+                bottomMargin = skip[1] + cut.bottom
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
     }
 
     private fun bindViews() {

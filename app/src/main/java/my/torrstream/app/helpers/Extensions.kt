@@ -18,6 +18,7 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -237,6 +238,32 @@ fun Activity.hideSystemUI() {
 //                    }, 2000) // 2 seconds delay before re-hiding
 //                }
 //            }
+        }
+    }
+}
+
+/**
+ * Окно — на весь экран, включая вырез под камеру. Окно с FLAG_FULLSCREEN (тема) в
+ * режиме выреза по умолчанию система сдвигает под вырез, и на телефоне оставалась
+ * чёрная полоса по линию шторки (в альбомной ориентации — сбоку). ALWAYS (Android 11+)
+ * пускает окно в вырез на любой стороне, SHORT_EDGES (Android 9–10) — на короткой.
+ * То, что там не читалось бы, отодвигают сами экраны: страница — по --safe-*
+ * (MainActivity.applyCutoutInsets), встроенный плеер — отступами панелей
+ * (InternalPlayerActivity.padControlsForCutout). Xiaomi и Huawei вдобавок смотрят на
+ * метаданные в манифесте (notch.config, android.notch_support).
+ *
+ * Вызывать до setContentView().
+ */
+fun Activity.coverDisplayCutout() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+    window?.let { w ->
+        // Иначе окно само «вписывается» в отступы: вырез уходил в отступ контента, и
+        // содержимое начиналось под ним, даже когда окно уже занимало весь экран
+        WindowCompat.setDecorFitsSystemWindows(w, false)
+        w.attributes = w.attributes.apply {
+            layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
     }
 }
