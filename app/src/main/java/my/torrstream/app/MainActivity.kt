@@ -42,6 +42,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.appcompat.widget.AppCompatEditText
@@ -538,10 +539,7 @@ class MainActivity : BaseActivity(),
 
     private fun setupActivity() {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
-        // No cutout mode is set here. With targetSdkVersion 28 the platform puts the app in
-        // compatibility mode and reserves the cutout area itself, ignoring the flag entirely, so
-        // setting it only misled the next person to read this. Raising targetSdk is what would
-        // hand the window that area back.
+        coverDisplayCutout()
         @Suppress("DEPRECATION")
         if (VERSION.SDK_INT <= Build.VERSION_CODES.TIRAMISU)
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
@@ -562,6 +560,29 @@ class MainActivity : BaseActivity(),
                 // Deliver the same Escape the page's own popstate handler synthesises, so
                 // screens still close normally even if the history sentinel was lost.
                 runVoidJsFunc(JS_BACK_FALLBACK, "")
+            }
+        }
+    }
+
+    /**
+     * Окно — на весь экран, включая вырез под камеру. Окно с FLAG_FULLSCREEN (тема) в
+     * режиме выреза по умолчанию система сдвигает под вырез, и на телефоне сверху
+     * оставалась чёрная полоса по линию шторки. ALWAYS (Android 11+) пускает окно в вырез
+     * на любой стороне, SHORT_EDGES (Android 9–10) — на короткой; элементы, которые там
+     * не читались бы, страница отодвигает сама по --safe-* (applyCutoutInsets).
+     * Xiaomi и Huawei вдобавок смотрят на метаданные в манифесте (notch.config,
+     * android.notch_support).
+     */
+    private fun coverDisplayCutout() {
+        if (VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        window?.let { w ->
+            // Иначе окно само «вписывается» в отступы: вырез уходил в отступ контента, и
+            // WebView начиналась под ним, даже когда окно уже занимало весь экран
+            WindowCompat.setDecorFitsSystemWindows(w, false)
+            w.attributes = w.attributes.apply {
+                layoutInDisplayCutoutMode = if (VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }
     }

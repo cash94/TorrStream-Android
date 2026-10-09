@@ -86,6 +86,10 @@
         android:theme="@style/Theme.LAMPA"
         tools:ignore="RtlEnabled"
         tools:targetApi="n">
+        <!-- Окно в вырезе под камеру (MainActivity.coverDisplayCutout): свои флаги прошивок -->
+        <meta-data android:name="notch.config" android:value="portrait|landscape" />
+        <meta-data android:name="android.notch_support" android:value="true" />
+        <meta-data android:name="android.max_aspect" android:value="2.5" />
         <activity
             android:name=".CrashActivity"
             android:exported="false" />
