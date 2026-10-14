@@ -58,15 +58,18 @@
     </style>
     <!-- Icon-only buttons on the built-in player's control bar. Sized so all ten fit in one row
          even on a narrow screen, with a focus highlight that reads clearly from a couch. -->
+    <!-- Кнопка ХУДа встроенного плеера, как .control-btn веб-плеера. Фон (круг и кольцо
+         фокуса цвета из «Внешнего вида») ставит код — HudStyle, цвет приходит из веба. -->
     <style name="PlayerControlButton">
-        <item name="android:layout_width">48dp</item>
-        <item name="android:layout_height">48dp</item>
-        <item name="android:layout_marginStart">2dp</item>
-        <item name="android:layout_marginEnd">2dp</item>
-        <item name="android:padding">10dp</item>
-        <item name="android:background">@drawable/player_button_bg</item>
+        <item name="android:layout_width">@dimen/hud_btn</item>
+        <item name="android:layout_height">@dimen/hud_btn</item>
+        <item name="android:layout_marginStart">@dimen/hud_btn_gap</item>
+        <item name="android:padding">@dimen/hud_btn_pad</item>
+        <item name="android:background">@null</item>
         <item name="android:scaleType">fitCenter</item>
+        <item name="tint">@color/hud_icon_tint</item>
         <item name="android:focusable">true</item>
         <item name="android:clickable">true</item>
+        <item name="android:nextFocusUp">@+id/seekBar</item>
     </style>
 </resources>

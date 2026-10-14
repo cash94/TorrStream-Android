@@ -249,6 +249,8 @@ class MainActivity : BaseActivity(),
         var lampaActivity: String = "{}" // JSON
         /** Web app's clientId, read out of the WebView so progress saving needs no page support. */
         var webClientId: String? = null
+        /** Цвет фокуса «Внешнего вида» веба — для старого веба, который не шлёт focus_color. */
+        var webFocusColor: String? = null
         lateinit var urlAdapter: ArrayAdapter<String>
     }
 
@@ -474,6 +476,7 @@ class MainActivity : BaseActivity(),
                     runVoidJsFunc(item[0], item[1])
                 }
                 cacheWebClientId()
+                cacheWebFocusColor()
                 publishSafeArea()
                 // Background update Android TV channels and recommendations
                 withContext(Dispatchers.Default) {
@@ -2409,6 +2412,20 @@ class MainActivity : BaseActivity(),
         }
     }
 
+    /**
+     * Цвет фокуса из настроек «Внешнего вида» (localStorage uiCustomizer). Нужен встроенному
+     * плееру, чтобы фокус был того же цвета, что и в интерфейсе; новый веб шлёт его сам в
+     * focus_color, а этот запас — для веба, выложенного до того.
+     */
+    private fun cacheWebFocusColor() {
+        val js = "(function(){try{return JSON.parse(localStorage.getItem('uiCustomizer')||'{}')" +
+                ".focusColor||null}catch(e){return null}})()"
+        browser?.evaluateJavascript(js) { raw ->
+            webFocusColor = raw?.trim()?.removeSurrounding("\"")
+                ?.takeIf { it.startsWith("#") }
+        }
+    }
+
     private fun getHeadersFromState(state: PlayerStateManager.PlaybackState): Array<String>? {
         return (state.extras["headers_array"] as? List<*>)?.filterIsInstance<String>()
             ?.toTypedArray()
@@ -2490,6 +2507,11 @@ class MainActivity : BaseActivity(),
             val clientId = jsonObject.optString("client_id")
                 .takeIf { it.isNotBlank() && it != "null" } ?: webClientId
             clientId?.let { putExtra(InternalPlayerActivity.Extras.CLIENT_ID, it) }
+
+            // Фокус кнопок плеера — того же цвета, что и в веб-интерфейсе
+            val focusColor = jsonObject.optString("focus_color")
+                .takeIf { it.startsWith("#") } ?: webFocusColor
+            focusColor?.let { putExtra(InternalPlayerActivity.Extras.FOCUS_COLOR, it) }
         }
         launchPlayer(intent)
     }

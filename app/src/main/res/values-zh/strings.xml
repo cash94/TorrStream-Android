@@ -25,6 +25,10 @@
     <string name="player_next_episode">下一集</string>
     <string name="player_audio_tracks">音轨</string>
     <string name="player_subtitles">字幕</string>
+    <string name="player_tracks">音频和字幕</string>
+    <string name="player_track_audio">音轨</string>
+    <string name="player_exit_hint">← 按返回键退出</string>
+    <string name="player_exit_again">再按一次返回键退出播放器</string>
     <string name="player_episodes">剧集列表</string>
     <string name="player_mute">静音</string>
     <string name="player_resize">屏幕缩放</string>

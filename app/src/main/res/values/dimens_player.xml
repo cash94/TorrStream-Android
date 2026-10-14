@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Размеры ХУДа встроенного плеера — те же, что у веб-плеера (styles.css, «ПЛЕЕР: ХУД ДЛЯ
+     ТЕЛЕВИЗОРА»). Здесь — узкий экран (телефон, @media max-width: 900px), где веб берёт
+     размеры в пикселях; values-w900dp — телевизор, где веб считает от ширины (vw) экрана
+     960dp. CSS-пиксель WebView равен dp, поэтому числа переносятся как есть.
+
+     Кнопка шире своего круга на кольцо фокуса с каждой стороны (в вебе это box-shadow
+     снаружи), поэтому отступы между кнопками — вебовские минус два кольца. -->
+<resources>
+    <dimen name="hud_focus_ring">3dp</dimen>
+    <!-- Круг 40dp + кольцо; значок 20dp -->
+    <dimen name="hud_btn">46dp</dimen>
+    <dimen name="hud_btn_pad">13dp</dimen>
+    <!-- Воспроизведение: круг 54dp + кольцо; значок 24dp -->
+    <dimen name="hud_play">60dp</dimen>
+    <dimen name="hud_play_pad">18dp</dimen>
+    <dimen name="hud_btn_gap">0dp</dimen>
+    <dimen name="hud_play_gap">6dp</dimen>
+
+    <dimen name="hud_side_pad">11dp</dimen>
+    <dimen name="hud_bottom_pad">13dp</dimen>
+    <dimen name="hud_buttons_top">5dp</dimen>
+    <dimen name="hud_seek_margin">3dp</dimen>
+    <dimen name="hud_time_text">14sp</dimen>
+    <dimen name="hud_buffer_text">12sp</dimen>
+
+    <dimen name="hud_header_start">14dp</dimen>
+    <dimen name="hud_header_top">12dp</dimen>
+    <dimen name="hud_title_text">16sp</dimen>
+    <dimen name="hud_stats_text">12sp</dimen>
+    <dimen name="hud_clock_top">14dp</dimen>
+    <dimen name="hud_clock_end">14dp</dimen>
+    <dimen name="hud_clock_text">16sp</dimen>
+
+    <!-- Подсказка «← Назад для выхода» под кнопками (#player-hint) и плашка «Нажмите «Назад»
+         ещё раз» (.player-hint-alert): в вебе — в vw, здесь для экрана около 850dp -->
+    <dimen name="hud_hint_text">11sp</dimen>
+    <dimen name="hud_hint_bottom">2dp</dimen>
+    <dimen name="hud_alert_bottom">50dp</dimen>
+    <dimen name="hud_alert_text">13sp</dimen>
+    <dimen name="hud_alert_pad_h">14dp</dimen>
+    <dimen name="hud_alert_pad_v">6dp</dimen>
+</resources>

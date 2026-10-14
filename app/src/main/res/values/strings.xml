@@ -27,6 +27,10 @@
     <string name="player_next_episode">Next episode</string>
     <string name="player_audio_tracks">Audio tracks</string>
     <string name="player_subtitles">Subtitles</string>
+    <string name="player_tracks">Audio &amp; subtitles</string>
+    <string name="player_track_audio">Audio track</string>
+    <string name="player_exit_hint">← Back to exit</string>
+    <string name="player_exit_again">Press Back again to exit the player</string>
     <string name="player_episodes">Episodes</string>
     <string name="player_mute">Mute</string>
     <string name="player_resize">Screen scaling</string>

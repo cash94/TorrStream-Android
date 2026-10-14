@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Значки кнопок ХУДа: на фокусе кнопка — белый круг, значок на нём тёмный, как в веб-плеере -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="#FF111111" android:state_focused="true" />
+    <item android:color="#EBFFFFFF" />
+</selector>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Вперёд на 10 секунд — как #forward-btn веб-плеера. Цифры «10» — контуры глифов Inter Bold (public/fonts/inter) в тех же координатах, что <text> в вебе: текста в векторах Android нет. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M21,12a9,9 0,1 1,-9 -9c2.52,0 4.93,1 6.74,2.74L21,8"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M21,3v5h-5"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10.002 9.58V15.4H8.814V10.63H8.775L7.44 11.574V10.482L8.727 9.58ZM13.223 15.478Q12.489 15.478 11.969 15.124Q11.448 14.771 11.171 14.105Q10.894 13.439 10.894 12.493Q10.894 11.551 11.172 10.882Q11.45 10.213 11.97 9.857Q12.49 9.502 13.223 9.502Q13.957 9.502 14.479 9.858Q15.001 10.215 15.277 10.883Q15.553 11.551 15.553 12.494Q15.553 13.437 15.278 14.104Q15.003 14.771 14.483 15.124Q13.963 15.478 13.223 15.478ZM13.224 14.488Q13.582 14.488 13.83 14.255Q14.079 14.022 14.209 13.576Q14.339 13.131 14.339 12.493Q14.339 11.853 14.209 11.404Q14.079 10.956 13.83 10.721Q13.581 10.486 13.224 10.486Q12.868 10.486 12.618 10.722Q12.369 10.958 12.239 11.405Q12.109 11.853 12.109 12.493Q12.109 13.131 12.238 13.576Q12.367 14.022 12.616 14.255Q12.866 14.488 13.224 14.488Z" />
+</vector>

@@ -41,8 +41,8 @@
         android:layout_gravity="top"
         android:background="@drawable/player_top_scrim"
         android:orientation="vertical"
-        android:paddingStart="32dp"
-        android:paddingTop="16dp"
+        android:paddingStart="@dimen/hud_header_start"
+        android:paddingTop="@dimen/hud_header_top"
         android:paddingEnd="110dp"
         android:paddingBottom="48dp">
 
@@ -56,7 +56,7 @@
             android:shadowDy="2"
             android:shadowRadius="10"
             android:textColor="@android:color/white"
-            android:textSize="20sp"
+            android:textSize="@dimen/hud_title_text"
             android:textStyle="bold" />
 
         <TextView
@@ -71,7 +71,7 @@
             android:shadowDy="1"
             android:shadowRadius="6"
             android:textColor="@android:color/white"
-            android:textSize="14sp"
+            android:textSize="@dimen/hud_stats_text"
             android:visibility="gone"
             tools:ignore="HardcodedText"
             tools:text="TORRSERVER 1.2 GB  |  СКОРОСТЬ 24.6 Mb/s  |  ПИРЫ 12 / 48  |  СИДЫ 7"
@@ -86,15 +86,15 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
-        android:layout_marginTop="16dp"
-        android:layout_marginEnd="24dp"
+        android:layout_marginTop="@dimen/hud_clock_top"
+        android:layout_marginEnd="@dimen/hud_clock_end"
         android:alpha="0.55"
         android:fontFeatureSettings="tnum"
         android:shadowColor="#99000000"
         android:shadowDy="2"
         android:shadowRadius="10"
         android:textColor="@android:color/white"
-        android:textSize="20sp"
+        android:textSize="@dimen/hud_clock_text"
         android:textStyle="bold"
         tools:ignore="HardcodedText"
         tools:text="23:47" />
@@ -106,10 +106,10 @@
         android:layout_gravity="bottom"
         android:background="@drawable/player_panel_bg"
         android:orientation="vertical"
-        android:paddingStart="32dp"
+        android:paddingStart="@dimen/hud_side_pad"
         android:paddingTop="48dp"
-        android:paddingEnd="32dp"
-        android:paddingBottom="16dp">
+        android:paddingEnd="@dimen/hud_side_pad"
+        android:paddingBottom="@dimen/hud_bottom_pad">
 
         <!-- Строка буфера, как в веб-плеере: «БУФЕР 25 сек | ДО КОНЦА 46 мин | КОНЕЦ В 14:04»,
              у левого края над временем. Запас буфера окрашен по уровню (см. updateStatusLine). -->
@@ -117,6 +117,7 @@
             android:id="@+id/remainingText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/hud_focus_ring"
             android:layout_marginBottom="8dp"
             android:ellipsize="end"
             android:fontFeatureSettings="tnum"
@@ -125,13 +126,17 @@
             android:shadowDy="1"
             android:shadowRadius="6"
             android:textColor="@android:color/white"
-            android:textSize="15sp"
+            android:textSize="@dimen/hud_buffer_text"
             tools:ignore="HardcodedText"
             tools:text="БУФЕР 25 сек  |  ДО КОНЦА 46 мин 49 сек  |  КОНЕЦ В 14:04" />
 
+        <!-- Время, полоса перемотки, длительность — одна строка, как #time-display веб-плеера.
+             Полоса и её фокус (кольцо цвета фокуса) — из кода, HudStyle. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/hud_focus_ring"
+            android:layout_marginEnd="@dimen/hud_focus_ring"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -140,22 +145,28 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:fontFeatureSettings="tnum"
-                android:minWidth="64dp"
                 android:text="00:00"
                 android:textColor="@android:color/white"
-                android:textSize="15sp" />
+                android:textSize="@dimen/hud_time_text" />
 
             <SeekBar
                 android:id="@+id/seekBar"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_marginEnd="12dp"
+                android:layout_marginStart="@dimen/hud_seek_margin"
+                android:layout_marginEnd="@dimen/hud_seek_margin"
                 android:layout_weight="1"
                 android:focusable="true"
                 android:focusableInTouchMode="false"
                 android:max="1000"
-                android:nextFocusDown="@+id/btnPlayPause" />
+                android:maxHeight="10dp"
+                android:minHeight="10dp"
+                android:nextFocusDown="@+id/btnPlayPause"
+                android:paddingStart="7dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="7dp"
+                android:paddingBottom="8dp"
+                android:splitTrack="false" />
 
             <TextView
                 android:id="@+id/durationText"
@@ -163,100 +174,139 @@
                 android:layout_height="wrap_content"
                 android:gravity="end"
                 android:fontFeatureSettings="tnum"
-                android:minWidth="64dp"
                 android:text="00:00"
                 android:textColor="@android:color/white"
-                android:textSize="15sp" />
+                android:textSize="@dimen/hud_time_text" />
         </LinearLayout>
 
+        <!-- Три колонки, как .button-row веб-плеера: пустая слева той же ширины, что и правая, —
+             поэтому воспроизведение стоит ровно по центру экрана, сколько бы кнопок ни было
+             справа. Порядок кнопок = порядок обхода стрелками. Серии и кнопки соседних серий
+             видны только у сериала (updateEpisodeButtons). -->
         <LinearLayout
             android:id="@+id/buttonsRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:gravity="center"
+            android:layout_marginTop="@dimen/hud_buttons_top"
+            android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <ImageButton
-                android:id="@+id/btnPrevEpisode"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_prev_episode"
-                android:nextFocusLeft="@+id/btnPrevEpisode"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/exo_icon_previous" />
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
-            <ImageButton
-                android:id="@+id/btnRewind"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_rewind"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/exo_icon_rewind" />
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-            <ImageButton
-                android:id="@+id/btnPlayPause"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_play_pause"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/exo_icon_pause" />
+                <ImageButton
+                    android:id="@+id/btnPrevEpisode"
+                    style="@style/PlayerControlButton"
+                    android:layout_marginStart="0dp"
+                    android:contentDescription="@string/player_prev_episode"
+                    android:src="@drawable/ic_hud_prev" />
 
-            <ImageButton
-                android:id="@+id/btnForward"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_forward"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/exo_icon_fastforward" />
+                <ImageButton
+                    android:id="@+id/btnRewind"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/player_rewind"
+                    android:src="@drawable/ic_hud_rewind" />
 
-            <ImageButton
-                android:id="@+id/btnNextEpisode"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_next_episode"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/exo_icon_next" />
+                <ImageButton
+                    android:id="@+id/btnPlayPause"
+                    style="@style/PlayerControlButton"
+                    android:layout_width="@dimen/hud_play"
+                    android:layout_height="@dimen/hud_play"
+                    android:layout_marginStart="@dimen/hud_play_gap"
+                    android:contentDescription="@string/player_play_pause"
+                    android:padding="@dimen/hud_play_pad"
+                    android:src="@drawable/ic_hud_pause" />
 
-            <ImageButton
-                android:id="@+id/btnAudio"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_audio_tracks"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/ic_player_audio" />
+                <ImageButton
+                    android:id="@+id/btnForward"
+                    style="@style/PlayerControlButton"
+                    android:layout_marginStart="@dimen/hud_play_gap"
+                    android:contentDescription="@string/player_forward"
+                    android:src="@drawable/ic_hud_forward" />
 
-            <ImageButton
-                android:id="@+id/btnSubtitles"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_subtitles"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/ic_player_subtitles" />
+                <ImageButton
+                    android:id="@+id/btnNextEpisode"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/player_next_episode"
+                    android:src="@drawable/ic_hud_next" />
+            </LinearLayout>
 
-            <ImageButton
-                android:id="@+id/btnEpisodes"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_episodes"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/ic_player_episodes" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="end|center_vertical"
+                android:orientation="horizontal">
 
-            <ImageButton
-                android:id="@+id/btnMute"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_mute"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/ic_player_volume" />
+                <ImageButton
+                    android:id="@+id/btnEpisodes"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/player_episodes"
+                    android:src="@drawable/ic_hud_episodes" />
 
-            <ImageButton
-                android:id="@+id/btnResize"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_resize"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/ic_player_resize" />
+                <ImageButton
+                    android:id="@+id/btnTracks"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/player_tracks"
+                    android:src="@drawable/ic_hud_tracks" />
 
-            <ImageButton
-                android:id="@+id/btnSettings"
-                style="@style/PlayerControlButton"
-                android:contentDescription="@string/player_settings"
-                android:nextFocusRight="@+id/btnSettings"
-                android:nextFocusUp="@+id/seekBar"
-                android:src="@drawable/ic_player_settings" />
+                <ImageButton
+                    android:id="@+id/btnSettings"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/player_settings"
+                    android:src="@drawable/ic_hud_settings" />
+
+                <ImageButton
+                    android:id="@+id/btnResize"
+                    style="@style/PlayerControlButton"
+                    android:contentDescription="@string/player_resize"
+                    android:nextFocusRight="@+id/btnResize"
+                    android:src="@drawable/ic_hud_zoom" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
+
+    <!-- «← Назад для выхода» у нижнего края под кнопками, как #player-hint веб-плеера.
+         Показывается и прячется вместе с ХУДом. -->
+    <TextView
+        android:id="@+id/playerHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="@dimen/hud_hint_bottom"
+        android:shadowColor="#80000000"
+        android:shadowRadius="4"
+        android:text="@string/player_exit_hint"
+        android:textColor="#CCAAAAAA"
+        android:textSize="@dimen/hud_hint_text" />
+
+    <!-- Первое «Назад» прячет ХУД и показывает это предупреждение, второе за две секунды —
+         выход (dispatchKeyEvent), как в веб-плеере (control.js: playerBackPress). -->
+    <TextView
+        android:id="@+id/exitAlert"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="@dimen/hud_alert_bottom"
+        android:background="@drawable/hud_alert_bg"
+        android:maxLines="1"
+        android:paddingStart="@dimen/hud_alert_pad_h"
+        android:paddingTop="@dimen/hud_alert_pad_v"
+        android:paddingEnd="@dimen/hud_alert_pad_h"
+        android:paddingBottom="@dimen/hud_alert_pad_v"
+        android:text="@string/player_exit_again"
+        android:textColor="@android:color/white"
+        android:textSize="@dimen/hud_alert_text"
+        android:textStyle="bold"
+        android:visibility="gone" />
 
     <!-- Seek read-out: where the scrub will land, which way it is going, and the current
          acceleration step. Centred, so it reads at a glance from across a room. -->

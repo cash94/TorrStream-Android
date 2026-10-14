@@ -25,6 +25,10 @@
     <string name="player_next_episode">Следующая серия</string>
     <string name="player_audio_tracks">Аудиодорожки</string>
     <string name="player_subtitles">Субтитры</string>
+    <string name="player_tracks">Аудио и субтитры</string>
+    <string name="player_track_audio">Аудиодорожка</string>
+    <string name="player_exit_hint">← Назад для выхода</string>
+    <string name="player_exit_again">Нажмите «Назад» ещё раз, чтобы выйти из плеера</string>
     <string name="player_episodes">Эпизоды</string>
     <string name="player_mute">Звук</string>
     <string name="player_resize">Масштаб экрана</string>

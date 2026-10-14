@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Телевизор: веб-плеер на экране 960dp (1080p при плотности 2) — vw веба, пересчитанные
+     в dp. Пояснения — в values/dimens_player.xml. -->
+<resources>
+    <dimen name="hud_btn_gap">4.5dp</dimen>
+    <dimen name="hud_play_gap">11dp</dimen>
+
+    <dimen name="hud_side_pad">31dp</dimen>
+    <dimen name="hud_bottom_pad">18dp</dimen>
+    <dimen name="hud_buttons_top">7dp</dimen>
+    <dimen name="hud_seek_margin">4dp</dimen>
+    <dimen name="hud_time_text">15sp</dimen>
+    <dimen name="hud_buffer_text">12.5sp</dimen>
+
+    <dimen name="hud_header_start">34dp</dimen>
+    <dimen name="hud_header_top">15dp</dimen>
+    <dimen name="hud_title_text">18sp</dimen>
+    <dimen name="hud_stats_text">11.5sp</dimen>
+    <dimen name="hud_clock_top">16dp</dimen>
+    <dimen name="hud_clock_end">19dp</dimen>
+    <dimen name="hud_clock_text">18sp</dimen>
+
+    <dimen name="hud_hint_text">9sp</dimen>
+    <dimen name="hud_hint_bottom">5dp</dimen>
+    <dimen name="hud_alert_bottom">58dp</dimen>
+    <dimen name="hud_alert_text">14.5sp</dimen>
+    <dimen name="hud_alert_pad_h">15dp</dimen>
+    <dimen name="hud_alert_pad_v">7dp</dimen>
+</resources>

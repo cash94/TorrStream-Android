@@ -2,6 +2,7 @@ package my.torrstream.app.player
 
 import android.app.Activity
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -11,6 +12,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.LinearInterpolator
 import android.widget.ArrayAdapter
@@ -76,8 +78,6 @@ import my.torrstream.app.helpers.Prefs.playerBufferMb
 import my.torrstream.app.helpers.Prefs.playerDecoderMode
 import my.torrstream.app.helpers.Prefs.playerEngine
 import my.torrstream.app.helpers.Prefs.playerShowClock
-// Non-transitive R classes are on, so media3's own drawables are not merged into our R.
-import androidx.media3.ui.R as Media3R
 import java.util.Date
 import java.util.Locale
 import kotlin.math.max
@@ -110,6 +110,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         const val SEASON = "season"
         const val TIMECODE_API = "timecode_api"  // POST endpoint that stores playback progress
         const val CLIENT_ID = "client_id"
+        const val FOCUS_COLOR = "focus_color"  // «#rrggbb» из «Внешнего вида» веб-интерфейса
     }
 
     private data class SkipRange(val type: String, val startMs: Long, val endMs: Long) {
@@ -158,7 +159,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         /** This close to the end, resuming would drop the viewer back into the credits. */
         private const val TIMECODE_END_GUARD_SEC = 10
 
-        private const val SEEK_STEP_MS = 15_000L
+        /** Кнопки и клавиши перемотки — как в веб-плеере, «10» нарисовано на значках. */
+        private const val SEEK_STEP_MS = 10_000L
 
         /**
          * Hold-to-seek acceleration, mirroring the web player: the longer a direction is held,
@@ -176,7 +178,10 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val CONTROLS_TIMEOUT_MS = 5_000L
         private const val SEEK_DEBOUNCE_MS = 250L
         private const val SEEK_BAR_STEPS = 1000
-        private const val DIMMED_ALPHA = 0.35f
+        private const val DIMMED_ALPHA = 0.3f  // .control-btn.is-disabled
+
+        /** Окно второго «Назад» для выхода и время на экране предупреждения (PLAYER_BACK_EXIT_MS). */
+        private const val BACK_EXIT_MS = 2_000L
 
         private val MPEG4_PART2_MIMES = setOf(MimeTypes.VIDEO_MP4V, MimeTypes.VIDEO_DIVX, MimeTypes.VIDEO_H263)
 
@@ -206,10 +211,8 @@ class InternalPlayerActivity : AppCompatActivity() {
     private lateinit var btnPlayPause: ImageButton
     private lateinit var btnForward: ImageButton
     private lateinit var btnNextEpisode: ImageButton
-    private lateinit var btnAudio: ImageButton
-    private lateinit var btnSubtitles: ImageButton
     private lateinit var btnEpisodes: ImageButton
-    private lateinit var btnMute: ImageButton
+    private lateinit var btnTracks: ImageButton
     private lateinit var btnResize: ImageButton
     private lateinit var btnSettings: ImageButton
     private lateinit var clockView: TextView
@@ -273,13 +276,24 @@ class InternalPlayerActivity : AppCompatActivity() {
     private var sidePanelActions: List<() -> Unit> = emptyList()
     private var sidePanelOpener: View? = null
 
+    /** Куда ведут «Назад» и «влево» из вложенного списка (дорожки → «Аудио и субтитры»). */
+    private var sidePanelBack: (() -> Unit)? = null
+
     /** Set while an item's action swaps in another panel, so the click does not close it. */
     private var sidePanelReplaced = false
 
     private val handler = Handler(Looper.getMainLooper())
     private var resizeModeIndex = 0
-    private var isMuted = false
-    private var volumeBeforeMute = 1f
+
+    private lateinit var playerHint: View
+    private lateinit var exitAlert: View
+
+    /** Когда нажали «Назад» в первый раз; второе нажатие в течение BACK_EXIT_MS — выход. */
+    private var lastBackPressAt = 0L
+    private val hideExitAlert = Runnable { exitAlert.visibility = View.GONE }
+
+    /** Цвет фокуса из веб-интерфейса (Extras.FOCUS_COLOR), см. HudStyle. */
+    private var focusColor = HudStyle.DEFAULT_FOCUS_COLOR
 
     /** Where "down" from the seek bar returns to — the button the user came up from. */
     private var lastFocusedButton: View? = null
@@ -366,10 +380,10 @@ class InternalPlayerActivity : AppCompatActivity() {
         btnPlayPause = findViewById(R.id.btnPlayPause)
         btnForward = findViewById(R.id.btnForward)
         btnNextEpisode = findViewById(R.id.btnNextEpisode)
-        btnAudio = findViewById(R.id.btnAudio)
-        btnSubtitles = findViewById(R.id.btnSubtitles)
         btnEpisodes = findViewById(R.id.btnEpisodes)
-        btnMute = findViewById(R.id.btnMute)
+        btnTracks = findViewById(R.id.btnTracks)
+        playerHint = findViewById(R.id.playerHint)
+        exitAlert = findViewById(R.id.exitAlert)
         btnResize = findViewById(R.id.btnResize)
         btnSettings = findViewById(R.id.btnSettings)
         clockView = findViewById(R.id.playerClock)
@@ -402,12 +416,11 @@ class InternalPlayerActivity : AppCompatActivity() {
         btnRewind.setOnClickListener { seekBy(-SEEK_STEP_MS) }
         btnForward.setOnClickListener { seekBy(SEEK_STEP_MS) }
         btnPlayPause.setOnClickListener { togglePlayPause() }
-        btnAudio.setOnClickListener { showTrackDialog(C.TRACK_TYPE_AUDIO) }
-        btnSubtitles.setOnClickListener { showTrackDialog(C.TRACK_TYPE_TEXT) }
         btnEpisodes.setOnClickListener { showEpisodesDialog() }
-        btnMute.setOnClickListener { toggleMute() }
+        btnTracks.setOnClickListener { showTracksMenu() }
         btnResize.setOnClickListener { cycleResizeMode() }
         btnSettings.setOnClickListener { showSettingsPanel() }
+        applyHudStyle()
 
         // Remember which button "up" was pressed from, so "down" comes back to the same place.
         val focusTracker = View.OnFocusChangeListener { view, hasFocus ->
@@ -470,6 +483,30 @@ class InternalPlayerActivity : AppCompatActivity() {
         }
 
         lastFocusedButton = btnPlayPause
+    }
+
+    /** Фокус цвета из «Внешнего вида» веба — на кнопках, полосе перемотки и «Пропустить». */
+    private fun applyHudStyle() {
+        focusColor = HudStyle.parseColor(intent.getStringExtra(Extras.FOCUS_COLOR))
+        controlButtons().forEach { it.setBackgroundKeepingPadding(HudStyle.button(this, focusColor, it === btnPlayPause)) }
+        seekBar.background = null
+        seekBar.progressTintList = null
+        seekBar.progressBackgroundTintList = null
+        seekBar.thumbTintList = null
+        seekBar.progressDrawable = HudStyle.seekTrack(this, focusColor)
+        seekBar.thumb = HudStyle.seekThumb(this)
+        skipButton.setBackgroundKeepingPadding(HudStyle.skipButton(this, focusColor))
+        sidePanelList.selector = HudStyle.listSelector(this, focusColor)
+    }
+
+    /** Фон с вписанным кругом (InsetDrawable) иначе подменил бы отступы, и значок вырос бы. */
+    private fun View.setBackgroundKeepingPadding(drawable: Drawable) {
+        val left = paddingLeft
+        val top = paddingTop
+        val right = paddingRight
+        val bottom = paddingBottom
+        background = drawable
+        setPadding(left, top, right, bottom)
     }
 
     // region pause screen saver
@@ -608,6 +645,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             checkedIndex = options.indexOf(playerBufferMb),
             actions = options.map { mb -> { applyBufferSize(mb) } },
             opener = btnSettings,
+            back = { showSettingsPanel() },
         )
     }
 
@@ -618,10 +656,13 @@ class InternalPlayerActivity : AppCompatActivity() {
     }
 
     /** Title with an explanatory second line, dimmer and smaller so the choice still reads first. */
-    private fun withDescription(title: String, descriptionRes: Int): CharSequence {
+    private fun withDescription(title: String, descriptionRes: Int): CharSequence =
+        withDescription(title, getString(descriptionRes))
+
+    private fun withDescription(title: String, description: String): CharSequence {
         val builder = SpannableStringBuilder(title)
             .append(NEW_LINE)
-            .append(getString(descriptionRes))
+            .append(description)
         val from = title.length + 1
         builder.setSpan(
             RelativeSizeSpan(0.75f), from, builder.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
@@ -650,6 +691,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             actions = modes.map { mode -> { applyDecoderMode(mode) } },
             opener = btnSettings,
             itemLayout = R.layout.item_side_panel_desc,
+            back = { showSettingsPanel() },
         )
     }
 
@@ -673,6 +715,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             actions = engines.map { engine -> { applyEngine(engine) } },
             opener = btnSettings,
             itemLayout = R.layout.item_side_panel_desc,
+            back = { showSettingsPanel() },
         )
     }
 
@@ -841,14 +884,16 @@ class InternalPlayerActivity : AppCompatActivity() {
         actions: List<() -> Unit>,
         opener: View?,
         itemLayout: Int = R.layout.item_side_panel,
+        back: (() -> Unit)? = null,
     ) {
         sidePanelActions = actions
         sidePanelOpener = opener
+        sidePanelBack = back
         sidePanelReplaced = true
         sidePanelTitle.setText(titleRes)
         // Without this the tick from a previous panel (say episode 3) survives into the next one.
         sidePanelList.clearChoices()
-        sidePanelList.adapter = ArrayAdapter(this, itemLayout, labels)
+        sidePanelList.adapter = sidePanelAdapter(itemLayout, labels)
         if (checkedIndex in labels.indices) {
             sidePanelList.setItemChecked(checkedIndex, true)
             sidePanelList.setSelection(checkedIndex)
@@ -862,8 +907,23 @@ class InternalPlayerActivity : AppCompatActivity() {
         sidePanelList.requestFocus()
     }
 
+    /** Строки списка — с фокусом цвета из веба, как и кнопки ХУДа. */
+    private fun sidePanelAdapter(itemLayout: Int, labels: List<CharSequence>) =
+        object : ArrayAdapter<CharSequence>(this, itemLayout, labels) {
+            private val textColors = HudStyle.listItemText(focusColor)
+
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
+                super.getView(position, convertView, parent).also { row ->
+                    if (convertView == null) {
+                        row.background = HudStyle.listItem(focusColor)
+                        (row as? TextView)?.setTextColor(textColors)
+                    }
+                }
+        }
+
     private fun hideSidePanel() {
         if (!sidePanelOpen) return
+        sidePanelBack = null
         sidePanel.animate()
             .translationX(sidePanel.width.toFloat())
             .setDuration(200)
@@ -879,7 +939,7 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private fun controlButtons(): List<View> = listOf(
         btnPrevEpisode, btnRewind, btnPlayPause, btnForward, btnNextEpisode,
-        btnAudio, btnSubtitles, btnEpisodes, btnMute, btnResize, btnSettings
+        btnEpisodes, btnTracks, btnSettings, btnResize
     )
 
     private var pendingSeekMs = 0L
@@ -904,22 +964,6 @@ class InternalPlayerActivity : AppCompatActivity() {
         showControls()
     }
 
-    private fun toggleMute() {
-        val p = player ?: return
-        if (isMuted) {
-            p.volume = volumeBeforeMute
-            isMuted = false
-        } else {
-            volumeBeforeMute = p.volume.takeIf { it > 0f } ?: 1f
-            p.volume = 0f
-            isMuted = true
-        }
-        btnMute.setImageResource(
-            if (isMuted) R.drawable.ic_player_volume_off else R.drawable.ic_player_volume
-        )
-        showControls()
-    }
-
     private fun cycleResizeMode() {
         resizeModeIndex = (resizeModeIndex + 1) % RESIZE_MODES.size
         playerView.resizeMode = RESIZE_MODES[resizeModeIndex]
@@ -928,18 +972,22 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private fun updatePlayPauseIcon() {
         val playing = player?.isPlaying == true
-        btnPlayPause.setImageResource(
-            if (playing) Media3R.drawable.exo_icon_pause else Media3R.drawable.exo_icon_play
-        )
+        btnPlayPause.setImageResource(if (playing) R.drawable.ic_hud_pause else R.drawable.ic_hud_play)
     }
 
-    /** Episode buttons stay focusable when unavailable so the left-to-right order never shifts. */
+    /**
+     * Как в веб-плеере: у фильма кнопок серий нет вовсе, у сериала крайняя серия гасит свою
+     * кнопку, но та остаётся в ряду, чтобы порядок обхода стрелками не менялся.
+     */
     private fun updateEpisodeButtons() {
         val p = player
+        val series = (p?.mediaItemCount ?: 0) > 1
+        val visibility = if (series) View.VISIBLE else View.GONE
+        btnPrevEpisode.visibility = visibility
+        btnNextEpisode.visibility = visibility
+        btnEpisodes.visibility = visibility
         btnPrevEpisode.alpha = if (p?.hasPreviousMediaItem() == true) 1f else DIMMED_ALPHA
         btnNextEpisode.alpha = if (p?.hasNextMediaItem() == true) 1f else DIMMED_ALPHA
-        val multiple = (p?.mediaItemCount ?: 0) > 1
-        btnEpisodes.alpha = if (multiple) 1f else DIMMED_ALPHA
     }
 
     // endregion
@@ -966,6 +1014,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         hudShown = visible
         fadeHud(controlsPanel, visible)
         fadeHud(headerView, visible)
+        fadeHud(playerHint, visible)
         clockView.animate().alpha(if (visible) CLOCK_ALPHA_HUD else CLOCK_ALPHA_IDLE)
             .setDuration(HUD_FADE_MS).start()
         // Статистику TorrServer опрашиваем, только пока её видно
@@ -1015,7 +1064,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 if (event.keyCode == KeyEvent.KEYCODE_BACK ||
                     event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT
                 ) {
-                    hideSidePanel()
+                    sidePanelBack?.invoke() ?: hideSidePanel()
                     return true
                 }
                 return super.dispatchKeyEvent(event)
@@ -1023,7 +1072,7 @@ class InternalPlayerActivity : AppCompatActivity() {
 
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BACK -> {
-                    finish()
+                    onBackInPlayer()
                     return true
                 }
 
@@ -1080,6 +1129,25 @@ class InternalPlayerActivity : AppCompatActivity() {
             if (controlsVisible) showControls() // keep it alive while the user is navigating
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    /**
+     * Как в веб-плеере (control.js: playerBackPress): первое «Назад» прячет ХУД и предупреждает,
+     * второе в течение BACK_EXIT_MS — выход. Второе выходит, даже если ХУД снова на экране.
+     */
+    private fun onBackInPlayer() {
+        val now = SystemClock.uptimeMillis()
+        if (lastBackPressAt != 0L && now - lastBackPressAt < BACK_EXIT_MS) {
+            lastBackPressAt = 0L
+            finish()
+            return
+        }
+        lastBackPressAt = now
+        handler.removeCallbacks(hideControls)
+        setControlsVisible(false)
+        exitAlert.visibility = View.VISIBLE
+        handler.removeCallbacks(hideExitAlert)
+        handler.postDelayed(hideExitAlert, BACK_EXIT_MS)
     }
 
     private fun KeyEvent.isDirectionalOrEnter(): Boolean = keyCode in setOf(
@@ -1481,7 +1549,46 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     // region dialogs
 
-    private fun showTrackDialog(trackType: @C.TrackType Int) {
+    /**
+     * «Аудио и субтитры», как в веб-плеере: два пункта с текущей дорожкой под названием,
+     * каждый открывает свой список, «Назад» из списка возвращает сюда.
+     */
+    private fun showTracksMenu() {
+        if (player == null) return
+        val audio = selectedTrackName(C.TRACK_TYPE_AUDIO) ?: "—"
+        val subtitles = selectedTrackName(C.TRACK_TYPE_TEXT) ?: getString(R.string.player_subtitles_off)
+        showSidePanel(
+            titleRes = R.string.player_tracks,
+            labels = listOf(
+                withDescription(getString(R.string.player_track_audio), audio),
+                withDescription(getString(R.string.player_subtitles), subtitles),
+            ),
+            checkedIndex = -1,
+            actions = listOf(
+                { showTrackDialog(C.TRACK_TYPE_AUDIO, fromMenu = true) },
+                { showTrackDialog(C.TRACK_TYPE_TEXT, fromMenu = true) },
+            ),
+            opener = btnTracks,
+            itemLayout = R.layout.item_side_panel_desc,
+        )
+    }
+
+    /** Название выбранной дорожки; null — не выбрана (субтитры выключены). */
+    private fun selectedTrackName(trackType: @C.TrackType Int): String? {
+        val p = player ?: return null
+        if (trackType in p.trackSelectionParameters.disabledTrackTypes) return null
+        var index = 0
+        p.currentTracks.groups.filter { it.type == trackType && it.isSupported }.forEach { group ->
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) continue
+                if (group.isTrackSelected(i)) return describeTrack(group, i, index)
+                index++
+            }
+        }
+        return null
+    }
+
+    private fun showTrackDialog(trackType: @C.TrackType Int, fromMenu: Boolean = false) {
         val p = player ?: return
         val groups = p.currentTracks.groups.filter { it.type == trackType && it.isSupported }
 
@@ -1529,7 +1636,8 @@ class InternalPlayerActivity : AppCompatActivity() {
             labels = labels,
             checkedIndex = checked,
             actions = actions,
-            opener = if (audio) btnAudio else btnSubtitles
+            opener = btnTracks,
+            back = if (fromMenu) ({ showTracksMenu() }) else null,
         )
     }
 
