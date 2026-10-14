@@ -48,6 +48,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -234,6 +235,14 @@ class InternalPlayerActivity : AppCompatActivity() {
     /** Set when the player is rebuilt (buffer change) so playback resumes where it left off. */
     private var resumeIndex: Int? = null
     private var resumePositionMs: Long? = null
+    private var resumeTrackParams: TrackSelectionParameters? = null
+
+    /**
+     * Приложение свернули: в onStop плеер освобождается, в onStart собирается заново с
+     * того же места. Пауза перед сворачиванием (playWhenReady до onPause) сохраняется.
+     */
+    private var stoppedInBackground = false
+    private var playingBeforePause = true
 
     private lateinit var seekOverlay: View
     private lateinit var seekOverlayTime: TextView
@@ -703,9 +712,7 @@ class InternalPlayerActivity : AppCompatActivity() {
      * which is the point of reaching for these mid-film.
      */
     private fun restartPlayer(what: String) {
-        val p = player
-        resumeIndex = p?.currentMediaItemIndex
-        resumePositionMs = p?.currentPosition?.coerceAtLeast(0L)
+        rememberResumePoint()
 
         handler.removeCallbacksAndMessages(null)
         releasePlayer()
@@ -1734,6 +1741,10 @@ class InternalPlayerActivity : AppCompatActivity() {
             .coerceAtLeast(0L)
         resumeIndex = null
         resumePositionMs = null
+        // Выбранные озвучка и субтитры: ExoPlayer узнаёт те же группы дорожек при повторном
+        // разборе файла, у libVLC группы новые — тогда просто дорожки по умолчанию
+        resumeTrackParams?.let { newPlayer.trackSelectionParameters = it }
+        resumeTrackParams = null
 
         newPlayer.setMediaItems(items, startIndex, startPosition)
         newPlayer.playWhenReady = true
@@ -2045,6 +2056,13 @@ class InternalPlayerActivity : AppCompatActivity() {
         }
     }
 
+    private fun rememberResumePoint() {
+        val p = player ?: return
+        resumeIndex = p.currentMediaItemIndex
+        resumePositionMs = p.currentPosition.coerceAtLeast(0L)
+        resumeTrackParams = p.trackSelectionParameters
+    }
+
     private fun releasePlayer() {
         snapshotPosition()
         timecodeJob?.cancel()
@@ -2063,9 +2081,29 @@ class InternalPlayerActivity : AppCompatActivity() {
         super.finish()
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (!stoppedInBackground) return
+        stoppedInBackground = false
+        // Вернулись из свёрнутого состояния: итог просмотра ещё впереди
+        resultDelivered = false
+        if (player != null) return
+        try {
+            initPlayer()
+            if (!playingBeforePause) player?.playWhenReady = false
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to resume playback", e)
+            App.toast(R.string.no_launch_player, true)
+            finish()
+        }
+    }
+
     override fun onPause() {
         super.onPause()
-        player?.pause()
+        player?.let {
+            playingBeforePause = it.playWhenReady
+            it.pause()
+        }
     }
 
     override fun onStop() {
@@ -2073,6 +2111,10 @@ class InternalPlayerActivity : AppCompatActivity() {
         stopTorrStats()
         snapshotPosition()
         deliverResult()
+        if (!isFinishing) {
+            rememberResumePoint()
+            stoppedInBackground = true
+        }
         releasePlayer()
         super.onStop()
     }
