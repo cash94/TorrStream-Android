@@ -36,6 +36,28 @@ class App : MultiDexApplication() {
     companion object {
         private val TAG: String = App::class.java.simpleName
         private lateinit var appContext: Context
+        private lateinit var instance: App
+
+        @Volatile
+        private var updateCheckRunning = false
+
+        /**
+         * Проверка обновлений при каждом открытии приложения, а не только при запуске процесса:
+         * выход из приложения (Назад, «Выход») процесс не завершает — его держат служба
+         * TorrServer и кэш процессов Android, — и раньше до перезагрузки устройства или
+         * «Остановить» в настройках новая версия не предлагалась.
+         */
+        fun checkForUpdatesOnLaunch() {
+            if (!BuildConfig.enableUpdate || updateCheckRunning) return
+            updateCheckRunning = true
+            instance.applicationScope.launch {
+                try {
+                    instance.checkForUpdates()
+                } finally {
+                    updateCheckRunning = false
+                }
+            }
+        }
 
         @Volatile
         var inForeground: Boolean = false
@@ -94,6 +116,7 @@ class App : MultiDexApplication() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         // setup applicationContext
         appContext = applicationContext.setLanguage()
         // Процессы-заглушки рендерера WebView (:sandboxed_process*, их заводит библиотека
@@ -116,12 +139,7 @@ class App : MultiDexApplication() {
     }
 
     private fun initializeComponents() {
-        // self-update check
-        if (BuildConfig.enableUpdate) {
-            applicationScope.launch {
-                checkForUpdates()
-            }
-        }
+        // Проверка обновлений — из MainActivity.onCreate (checkForUpdatesOnLaunch)
 
         // Init TMDB genres
         applicationScope.launch {

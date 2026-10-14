@@ -287,6 +287,9 @@ class MainActivity : BaseActivity(),
         setupUI()
         setupIntents()
 
+        // Новое открытие приложения, а не пересоздание экрана (смена языка и т. п.)
+        if (savedInstanceState == null) App.checkForUpdatesOnLaunch()
+
         if (firstRun) {
             CoroutineScope(Dispatchers.Default).launch {
                 logDebug("First run scheduleUpdate(sync: true)")
