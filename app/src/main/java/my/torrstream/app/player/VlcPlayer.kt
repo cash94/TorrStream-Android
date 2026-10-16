@@ -23,6 +23,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import my.torrstream.app.helpers.Prefs
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
@@ -50,10 +51,38 @@ class VlcPlayer(
     private val subtitleIndex: Int,
     /** Сколько держать в сетевом кэше; libVLC не умеет сказать, сколько реально скачано. */
     private val cachingMs: Int = DEFAULT_CACHING_MS,
+    /** Вывод звука — одна из констант Prefs.AUDIO_*, см. [AudioOutput]. */
+    audioMode: Int = Prefs.AUDIO_PCM,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
 
-    private val libVlc = LibVLC(context.applicationContext, LIBVLC_OPTIONS)
-    private val mediaPlayer = MediaPlayer(libVlc)
+    /**
+     * Битстрим на ресивер. Его умеет только модуль AudioTrack libVLC; OpenSL ES выводит
+     * исключительно PCM, так что в режиме PCM звук гарантированно декодируется. «Авто» берёт
+     * AudioTrack, только когда устройство само заявляет битстрим: у этого модуля бывал сбой
+     * («module not functional» — фильм без звука), и без ресивера рисковать незачем.
+     */
+    private val passthrough = when (audioMode) {
+        Prefs.AUDIO_PASSTHROUGH -> true
+        Prefs.AUDIO_AUTO -> AudioOutput.deviceSupportsPassthrough(context)
+        else -> false
+    }
+
+    private val libVlc = LibVLC(
+        context.applicationContext,
+        if (passthrough) LIBVLC_OPTIONS_PASSTHROUGH else LIBVLC_OPTIONS,
+    )
+    private val mediaPlayer = MediaPlayer(libVlc).apply {
+        if (passthrough) {
+            // Что выводить битстримом, MediaPlayer решает сам по HDMI-устройству
+            // (AudioDeviceInfo.getEncodings) и переключается при подключении ресивера.
+            setAudioDigitalOutputEnabled(true)
+            // «Прямой вывод» — не спрашивая устройство (оптика и ARC о себе не сообщают)
+            if (audioMode == Prefs.AUDIO_PASSTHROUGH) {
+                forceAudioDigitalEncodings(AudioOutput.forcedVlcEncodings(context))
+            }
+        }
+        Log.i(TAG, "Audio output mode $audioMode, passthrough=$passthrough")
+    }
 
     private var items: List<MediaItem> = emptyList()
     private var index = 0
@@ -437,16 +466,31 @@ class VlcPlayer(
         const val DEFAULT_CACHING_MS = 3000
         const val SEEK_SETTLE_MS = 1500L
 
-        val LIBVLC_OPTIONS = arrayListOf(
+        private val COMMON_OPTIONS = listOf(
             "--http-reconnect",
-            // OpenSL ES, а не AudioTrack: модуль AudioTrack libVLC 3.6 после перезапуска
-            // аудиодекодера (смена формата потока в начале файла) не открывался снова
-            // («module not functional»), и фильм шёл без звука. Проверено на Android 9.
-            "--aout=opensles",
             // Кадр выводится даже с опозданием, а не выбрасывается: на слабой приставке
             // программный декодер лучше чуть отстаёт, чем показывает рваную картинку.
             "--no-drop-late-frames",
             "--no-skip-frames",
+        )
+
+        val LIBVLC_OPTIONS = ArrayList(
+            COMMON_OPTIONS + listOf(
+                // OpenSL ES, а не AudioTrack: модуль AudioTrack libVLC 3.6 после перезапуска
+                // аудиодекодера (смена формата потока в начале файла) не открывался снова
+                // («module not functional»), и фильм шёл без звука. Проверено на Android 9.
+                // К тому же OpenSL ES выводит только PCM — режим «Декодировать в PCM».
+                "--aout=opensles",
+                "--no-spdif",
+            )
+        )
+
+        /** Битстрим на ресивер — только через AudioTrack, как в VLC для Android. */
+        val LIBVLC_OPTIONS_PASSTHROUGH = ArrayList(
+            COMMON_OPTIONS + listOf(
+                "--aout=android_audiotrack",
+                "--spdif",
+            )
         )
 
         val COMMANDS: Player.Commands = Player.Commands.Builder()

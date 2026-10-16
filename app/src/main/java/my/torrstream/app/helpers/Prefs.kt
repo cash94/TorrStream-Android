@@ -30,6 +30,7 @@ object Prefs {
     private const val PLAYER_BUFFER_KEY = "player_buffer_mb"
     private const val PLAYER_DECODER_KEY = "player_decoder"
     private const val PLAYER_ENGINE_KEY = "player_engine"
+    private const val PLAYER_AUDIO_KEY = "player_audio"
 
     /** Hardware first, software picked up whenever hardware cannot handle the track. */
     const val DECODER_COMBINED = 0
@@ -42,6 +43,17 @@ object Prefs {
     const val ENGINE_AUTO = 0
     /** Всегда libVLC. */
     const val ENGINE_VLC = 1
+
+    /**
+     * Вывод звука встроенного плеера. PCM — приставка сама декодирует AC3/E-AC3/DTS: звук есть
+     * всегда, в том числе с саундбаром по ARC/оптике, который молчит на битстриме, заявленном
+     * телевизором. По умолчанию, как у Kodi и VLC.
+     */
+    const val AUDIO_PCM = 0
+    /** Битстрим на ресивер, если устройство (HDMI, «объёмный звук» в системе) его заявляет. */
+    const val AUDIO_AUTO = 1
+    /** Битстрим AC3/E-AC3/DTS всегда, даже если устройство о поддержке не сообщает. */
+    const val AUDIO_PASSTHROUGH = 2
 
     /** Buffer sizes offered in the built-in player's settings, in megabytes. */
     val PLAYER_BUFFER_OPTIONS = intArrayOf(30, 50, 80, 120, 160, 200)
@@ -104,6 +116,11 @@ object Prefs {
     var Context.playerEngine: Int
         get() = appPrefs.getInt(PLAYER_ENGINE_KEY, ENGINE_AUTO)
         set(value) = appPrefs.edit { putInt(PLAYER_ENGINE_KEY, value) }
+
+    /** Встроенный плеер: как выводить звук — одна из констант AUDIO_*. */
+    var Context.playerAudioMode: Int
+        get() = appPrefs.getInt(PLAYER_AUDIO_KEY, AUDIO_PCM)
+        set(value) = appPrefs.edit { putInt(PLAYER_AUDIO_KEY, value) }
 
     /** Built-in player: how much of the stream ExoPlayer keeps buffered, in megabytes. */
     var Context.playerBufferMb: Int

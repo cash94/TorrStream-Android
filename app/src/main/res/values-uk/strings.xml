@@ -66,7 +66,16 @@
     <string name="player_engine_auto">Авто</string>
     <string name="player_engine_auto_desc">ExoPlayer; файли, які він не може декодувати (AVI з XviD/DivX, WMV…), переходять на VLC</string>
     <string name="player_engine_vlc">Завжди VLC</string>
-    <string name="player_engine_vlc_desc">Власні декодери FFmpeg для будь-яких форматів; без передачі AC3/DTS на ресивер по HDMI</string>
+    <string name="player_engine_vlc_desc">Власні декодери FFmpeg для будь-яких форматів</string>
+    <string name="player_audio">Виведення звуку</string>
+    <string name="player_audio_desc">Як виводити багатоканальний звук (AC3, E-AC3, DTS)</string>
+    <string name="player_audio_pcm">Декодувати в PCM</string>
+    <string name="player_audio_pcm_desc">Сумісність: звук декодує сам пристрій. Оберіть, якщо із саундбаром або ресивером немає звуку</string>
+    <string name="player_audio_auto">Авто</string>
+    <string name="player_audio_auto_desc">Пряме виведення, якщо телевізор або ресивер повідомляє про підтримку формату, інакше PCM</string>
+    <string name="player_audio_passthrough">Пряме виведення (passthrough)</string>
+    <string name="player_audio_passthrough_desc">AC3, E-AC3 і DTS завжди йдуть на ресивер без декодування. Без звуку, якщо ресивер їх не приймає</string>
+    <string name="player_audio_pcm_fallback">Пряме виведення звуку не вдалося — декодую в PCM</string>
     <string name="player_switching_vlc">Пристрій не може декодувати цей файл - перемикаюся на VLC</string>
     <string name="player_decoder_combined">Комбінований</string>
     <string name="player_decoder_hardware">Апаратний</string>

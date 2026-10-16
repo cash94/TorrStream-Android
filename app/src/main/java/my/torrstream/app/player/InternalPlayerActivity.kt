@@ -3,6 +3,7 @@ package my.torrstream.app.player
 import android.app.Activity
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -64,6 +65,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
@@ -74,6 +76,7 @@ import androidx.media3.ui.PlayerView
 import my.torrstream.app.App
 import my.torrstream.app.R
 import my.torrstream.app.helpers.Prefs
+import my.torrstream.app.helpers.Prefs.playerAudioMode
 import my.torrstream.app.helpers.Prefs.playerBufferMb
 import my.torrstream.app.helpers.Prefs.playerDecoderMode
 import my.torrstream.app.helpers.Prefs.playerEngine
@@ -185,6 +188,12 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         private val MPEG4_PART2_MIMES = setOf(MimeTypes.VIDEO_MP4V, MimeTypes.VIDEO_DIVX, MimeTypes.VIDEO_H263)
 
+        /** Звуковой выход не открылся или отказал — так ломается битстрим, который не принят. */
+        private val AUDIO_OUTPUT_ERRORS = setOf(
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
+        )
+
         private val RESIZE_MODES = intArrayOf(
             AspectRatioFrameLayout.RESIZE_MODE_FIT,
             AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
@@ -227,6 +236,16 @@ class InternalPlayerActivity : AppCompatActivity() {
      */
     private var softwareVideoFallback = false
     private var videoFallbackTried = false
+
+    /**
+     * Битстрим на ресивер не открылся (AudioTrack с AC3/DTS не создаётся) — этот файл
+     * доигрываем с декодированием в PCM. В настройки не пишется, как и откаты выше.
+     */
+    private var pcmAudioFallback = false
+
+    /** Режим вывода звука с учётом отката: одна из констант Prefs.AUDIO_*. */
+    private val audioMode: Int
+        get() = if (pcmAudioFallback) Prefs.AUDIO_PCM else playerAudioMode
 
     /**
      * Играет ли сейчас libVLC. Включается настройкой «Движок» или сам, когда ExoPlayer не
@@ -557,7 +576,19 @@ class InternalPlayerActivity : AppCompatActivity() {
      * MPEG-4 Part 2 (DivX/Xvid) on a device whose hardware decoder rejects it.
      */
     private fun buildRenderersFactory(): DefaultRenderersFactory {
-        val factory = DefaultRenderersFactory(this)
+        val audioMode = audioMode
+        val factory = object : DefaultRenderersFactory(this) {
+            // Режим «Вывод звука»: PCM или битстрим решает выход, а не рендерер — рендерер
+            // сам переходит на декодер, когда выход формат как есть не берёт.
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink? = AudioOutput.buildExoAudioSink(
+                context, audioMode, enableFloatOutput, enableAudioTrackPlaybackParams,
+            ) ?: super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+        }
+        Log.i(TAG, "Audio output mode $audioMode")
         val mode = if (softwareVideoFallback) Prefs.DECODER_SOFTWARE else playerDecoderMode
         return when (mode) {
             Prefs.DECODER_HARDWARE -> factory
@@ -572,8 +603,9 @@ class InternalPlayerActivity : AppCompatActivity() {
 
             // Combined, the default. EXTENSION_RENDERER_MODE_ON, not _PREFER: the platform
             // renderer keeps first refusal, so HDMI passthrough of AC3/DTS to a receiver still
-            // wins where it is available. The bundled FFmpeg decoders only step in when nothing
-            // else can handle the track — e.g. a DTS-only file on a phone with no DTS decoder.
+            // wins where it is available and allowed (see AudioOutput). The bundled FFmpeg
+            // decoders only step in when nothing else can handle the track — e.g. a DTS-only
+            // file on a phone with no DTS decoder.
             else -> factory
                 .setEnableDecoderFallback(true)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
@@ -615,6 +647,11 @@ class InternalPlayerActivity : AppCompatActivity() {
                         getString(engineLabelRes(playerEngine)),
                 R.string.player_engine_desc,
             ),
+            withDescription(
+                "${getString(R.string.player_audio)}: " +
+                        getString(audioLabelRes(playerAudioMode)),
+                R.string.player_audio_desc,
+            ),
         )
         val actions = listOf<() -> Unit>(
             {
@@ -626,6 +663,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             { showBufferPanel() },
             { showDecoderPanel() },
             { showEnginePanel() },
+            { showAudioPanel() },
         )
         showSidePanel(
             titleRes = R.string.player_settings,
@@ -717,6 +755,41 @@ class InternalPlayerActivity : AppCompatActivity() {
             itemLayout = R.layout.item_side_panel_desc,
             back = { showSettingsPanel() },
         )
+    }
+
+    private fun audioLabelRes(mode: Int) = when (mode) {
+        Prefs.AUDIO_AUTO -> R.string.player_audio_auto
+        Prefs.AUDIO_PASSTHROUGH -> R.string.player_audio_passthrough
+        else -> R.string.player_audio_pcm
+    }
+
+    private fun audioDescriptionRes(mode: Int) = when (mode) {
+        Prefs.AUDIO_AUTO -> R.string.player_audio_auto_desc
+        Prefs.AUDIO_PASSTHROUGH -> R.string.player_audio_passthrough_desc
+        else -> R.string.player_audio_pcm_desc
+    }
+
+    private fun showAudioPanel() {
+        val modes = listOf(Prefs.AUDIO_PCM, Prefs.AUDIO_AUTO, Prefs.AUDIO_PASSTHROUGH)
+        showSidePanel(
+            titleRes = R.string.player_audio,
+            labels = modes.map {
+                withDescription(getString(audioLabelRes(it)), audioDescriptionRes(it))
+            },
+            checkedIndex = modes.indexOf(playerAudioMode),
+            actions = modes.map { mode -> { applyAudioMode(mode) } },
+            opener = btnSettings,
+            itemLayout = R.layout.item_side_panel_desc,
+            back = { showSettingsPanel() },
+        )
+    }
+
+    /** Выход звука собирается вместе с плеером — пересобираем с той же позиции. */
+    private fun applyAudioMode(mode: Int) {
+        if (mode == playerAudioMode && !pcmAudioFallback) return
+        playerAudioMode = mode
+        pcmAudioFallback = false
+        restartPlayer("audio mode $mode")
     }
 
     private fun applyEngine(engine: Int) {
@@ -1872,6 +1945,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         headers = headers,
         subtitleUrls = intent.getStringArrayExtra(Extras.SUBS)?.toList().orEmpty(),
         subtitleIndex = intent.getIntExtra(Extras.PLAYLIST_INDEX, 0),
+        audioMode = audioMode,
     )
 
     private fun buildExoPlayer(headers: Map<String, String>): Player {
@@ -2075,6 +2149,20 @@ class InternalPlayerActivity : AppCompatActivity() {
                 App.toast(R.string.player_switching_software, true)
                 // Posted, not called inline: this runs inside the player's own error callback.
                 handler.post { restartPlayer("software video fallback") }
+                return
+            }
+
+            // Ресивер (или система) не принял битстрим: AudioTrack с AC3/DTS не создаётся.
+            // Звук декодируем сами — с той же позиции, только для этого файла.
+            if (!usingVlc &&
+                !pcmAudioFallback &&
+                audioMode != Prefs.AUDIO_PCM &&
+                error.errorCode in AUDIO_OUTPUT_ERRORS
+            ) {
+                pcmAudioFallback = true
+                Log.w(TAG, "Audio passthrough failed, decoding to PCM: ${error.errorCodeName}")
+                App.toast(R.string.player_audio_pcm_fallback, true)
+                handler.post { restartPlayer("PCM audio fallback") }
                 return
             }
 
