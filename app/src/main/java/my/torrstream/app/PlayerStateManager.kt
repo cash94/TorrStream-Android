@@ -93,6 +93,9 @@ class PlayerStateManager(context: Context) {
      * @property season Season number, if the item is a TV episode (may be absent)
      * @property episode Episode number, if the item is a TV episode (may be absent)
      * @property imdbId IMDb id from the card (may be absent)
+     * @property episodeTitle Ready-made episode label from the web UI, e.g. "Серия 1 - Зима близко"
+     *   (number and TMDB name). Separate from [title], which external players and older builds
+     *   still get as before; absent when the web UI is older or knows nothing about the episode.
      */
     data class PlaylistItem(
         val url: String,
@@ -104,7 +107,8 @@ class PlayerStateManager(context: Context) {
         val segments: String? = null,
         val season: Int? = null,
         val episode: Int? = null,
-        val imdbId: String? = null
+        val imdbId: String? = null,
+        val episodeTitle: String? = null
     ) {
         /**
          * Data class representing playback timeline information.
@@ -354,6 +358,7 @@ class PlayerStateManager(context: Context) {
                     put(JSONObject().apply {
                         put("url", item.url)
                         item.title?.let { put("title", it) }
+                        item.episodeTitle?.let { put("episode_title", it) }
                         item.timeline?.let { timeline ->
                             put("timeline", JSONObject().apply {
                                 put("hash", timeline.hash)
@@ -743,7 +748,9 @@ class PlayerStateManager(context: Context) {
 
             // IMDb id: a persisted flat field, else from the card (data.card.imdb_id) if present.
             imdbId = optString("imdb_id").takeIf { it.isNotEmpty() }
-                ?: optJSONObject("card")?.optString("imdb_id")?.takeIf { it.isNotEmpty() }
+                ?: optJSONObject("card")?.optString("imdb_id")?.takeIf { it.isNotEmpty() },
+
+            episodeTitle = optString("episode_title").takeIf { it.isNotEmpty() }
         )
     }
 
@@ -819,6 +826,7 @@ class PlayerStateManager(context: Context) {
             season?.let { put("season", it) }
             episode?.let { put("episode", it) }
             imdbId?.let { put("imdb_id", it) }
+            episodeTitle?.let { put("episode_title", it) }
         }
     }
 

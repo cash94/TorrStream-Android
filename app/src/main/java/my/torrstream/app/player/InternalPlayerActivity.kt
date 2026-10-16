@@ -105,6 +105,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         const val HEADERS = "headers"          // flat [key, value, key, value] like the other players
         const val PLAYLIST_URLS = "playlist_urls"
         const val PLAYLIST_TITLES = "playlist_titles"
+        // String[] parallel to PLAYLIST_URLS: "Серия 1 - Название" from the web UI, "" where unknown
+        const val PLAYLIST_EPISODE_TITLES = "playlist_episode_titles"
         const val PLAYLIST_INDEX = "playlist_index"
         const val SUBS = "subs"                // String[] of subtitle urls for the current item
         const val SUBS_NAME = "subs.name"
@@ -1753,9 +1755,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         }
         // Plain "Episode N" rather than the raw TorrServer file name: release names are long,
         // noisy and near-identical between episodes, which made the list hard to scan.
-        val titles = (0 until p.mediaItemCount).map { index ->
-            getString(R.string.player_episode_number, index + 1)
-        }
+        // When the web UI knows the episode from TMDB it sends "Серия N - Название" instead.
+        val titles = (0 until p.mediaItemCount).map { index -> episodeLabel(index) }
         showSidePanel(
             titleRes = R.string.player_episodes,
             labels = titles,
@@ -2045,12 +2046,19 @@ class InternalPlayerActivity : AppCompatActivity() {
         val base = intent.getStringExtra(Extras.TITLE)?.trim().orEmpty()
         val p = player
         titleView.text = if (p != null && p.mediaItemCount > 1) {
-            val episode = getString(R.string.player_episode_number, p.currentMediaItemIndex + 1)
+            val episode = episodeLabel(p.currentMediaItemIndex)
             if (base.isEmpty()) episode else "$base · $episode"
         } else {
             base
         }
     }
+
+    /** "Серия 1 - Название" from the web UI when it sent one for this item, else "Episode N". */
+    private fun episodeLabel(index: Int): String =
+        intent.getStringArrayExtra(Extras.PLAYLIST_EPISODE_TITLES)
+            ?.getOrNull(index)
+            ?.takeIf { it.isNotBlank() }
+            ?: getString(R.string.player_episode_number, index + 1)
 
     /**
      * The one thing worth knowing when a file will not play is what is actually inside it, so an

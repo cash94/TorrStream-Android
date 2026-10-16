@@ -2643,6 +2643,13 @@ class MainActivity : BaseActivity(),
                     InternalPlayerActivity.Extras.PLAYLIST_TITLES,
                     state.playlist.map { it.title ?: videoTitle }.toTypedArray()
                 )
+                // "Серия 1 - Название" from the web UI; empty string = not known for this item
+                if (state.playlist.any { !it.episodeTitle.isNullOrEmpty() }) {
+                    putExtra(
+                        InternalPlayerActivity.Extras.PLAYLIST_EPISODE_TITLES,
+                        state.playlist.map { it.episodeTitle.orEmpty() }.toTypedArray()
+                    )
+                }
                 putExtra(InternalPlayerActivity.Extras.PLAYLIST_INDEX, state.currentIndex)
             }
 
