@@ -66,6 +66,9 @@ import net.gotev.speech.Speech
 import net.gotev.speech.SpeechDelegate
 import net.gotev.speech.SpeechRecognitionNotAvailable
 import net.gotev.speech.SpeechUtil
+import net.gotev.speech.engine.BaseSpeechRecognitionEngine
+import net.gotev.speech.engine.BaseTextToSpeechEngine
+import net.gotev.speech.engine.DummyOnInitListener
 import net.gotev.speech.ui.SpeechProgressView
 import org.json.JSONException
 import org.json.JSONObject
@@ -138,6 +141,9 @@ class MainActivity : BaseActivity(),
     private lateinit var loaderView: View
     private lateinit var resultLauncher: ActivityResultLauncher<Intent>
     private lateinit var speechLauncher: ActivityResultLauncher<Intent>
+    private lateinit var micPermissionLauncher: ActivityResultLauncher<String>
+    /** Системное окно распознавания открыто для строки поиска веб-интерфейса. */
+    private var voiceSearchByIntent = false
     private lateinit var channelBrowsableLauncher: ActivityResultLauncher<Intent>
     /** Каналы, которые ждут системного вопроса «Показать на главном экране?» — по одному. */
     private val pendingBrowsableChannels = ArrayDeque<Long>()
@@ -318,6 +324,8 @@ class MainActivity : BaseActivity(),
     }
 
     override fun onPause() {
+        // Свернули посреди диктовки — микрофон отпускаем, строка получит, что успели
+        if (isVoiceSearchListening()) stopVoiceSearch(retry = false)
         if (browserInitComplete) {
             if (engineImportOrigin == null && WebViewEngine.switchPending(this)) {
                 // Движок сменится при следующем запуске («Позже» в диалоге) — выгружаем
@@ -594,6 +602,14 @@ class MainActivity : BaseActivity(),
     }
 
     private fun handleSpeechResult(result: androidx.activity.result.ActivityResult) {
+        if (voiceSearchByIntent) {
+            voiceSearchByIntent = false
+            val text = if (result.resultCode == RESULT_OK)
+                result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            else null
+            if (text != null) voiceSearchEvent("result", text.trim()) else voiceSearchEvent("cancel")
+            return
+        }
         if (result.resultCode == RESULT_OK) {
             // There are no request codes
             val data: Intent? = result.data
@@ -866,6 +882,11 @@ class MainActivity : BaseActivity(),
         speechLauncher =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                 handleSpeechResult(result)
+            }
+        micPermissionLauncher =
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                // Без разрешения — системное окно: ему наше разрешение не нужно
+                if (granted) listenVoiceSearch() else recognizeVoiceSearchByIntent()
             }
         channelBrowsableLauncher =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -2213,6 +2234,159 @@ class MainActivity : BaseActivity(),
             }
         }
         return false
+    }
+
+    // ── Голосовой ввод в строку поиска (веб: app.js, setupVoiceSearch) ──
+    // Слушает SpeechRecognizer прямо в приложении, без системного окна:
+    // промежуточный текст сразу появляется в строке. События уходят в
+    // window.onAndroidVoiceSearch(event, text): listening / partial / result /
+    // cancel / error. Нет разрешения на микрофон или службы распознавания —
+    // системное окно RecognizerIntent.
+
+    fun startVoiceSearch() {
+        if (hasMicPermissions(this)) listenVoiceSearch()
+        else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+    }
+
+    /**
+     * Хватит слушать: строка получит то, что успели разобрать. Движок
+     * отбрасывает стоп раньше чем через 1,2 с после старта — тогда повторяем.
+     */
+    fun stopVoiceSearch(retry: Boolean = true) {
+        val speech = try {
+            Speech.getInstance()
+        } catch (_: Exception) {
+            null
+        }
+        if (speech == null || !speech.isListening) {
+            voiceSearchEvent("cancel")
+            return
+        }
+        speech.stopListening()
+        if (retry && speech.isListening) lifecycleScope.launch {
+            delay(1300)
+            if (speech.isListening) speech.stopListening()
+        }
+    }
+
+    private fun isVoiceSearchListening() = try {
+        Speech.getInstance().isListening
+    } catch (_: Exception) {
+        false
+    }
+
+    /** Движок распознавания, который помнит код последней ошибки. */
+    private class VoiceSearchEngine : BaseSpeechRecognitionEngine() {
+        @Volatile
+        var lastError = 0
+
+        override fun onError(code: Int) {
+            lastError = code
+            super.onError(code)
+        }
+    }
+
+    private var voiceEngine: VoiceSearchEngine? = null
+
+    private fun voiceSpeech(): Speech {
+        val existing = try {
+            Speech.getInstance()
+        } catch (_: IllegalStateException) {
+            null
+        }
+        if (existing != null) return existing
+        val engine = VoiceSearchEngine()
+        voiceEngine = engine
+        return Speech.init(baseContext, packageName, DummyOnInitListener(), engine, BaseTextToSpeechEngine())
+    }
+
+    /**
+     * Почему распознавание закончилось ничем. Движок на любой ошибке отдаёт
+     * пустой итог, а «не разобрал речь» и «нет связи со службой» — разные
+     * вещи: во втором случае повторять бесполезно. null — просто не разобрал.
+     */
+    private fun voiceSearchErrorText(code: Int): String? = when (code) {
+        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
+        SpeechRecognizer.ERROR_SERVER -> getString(R.string.voice_search_error_network)
+        SpeechRecognizer.ERROR_AUDIO, SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+            getString(R.string.voice_search_error_mic)
+        else -> null
+    }
+
+    private fun listenVoiceSearch() {
+        val speech = try {
+            voiceSpeech()
+        } catch (e: Exception) {
+            Log.e("speech", "Speech init failed", e)
+            null
+        }
+        if (speech == null) {
+            recognizeVoiceSearchByIntent()
+            return
+        }
+        if (speech.isListening) return
+        speech.setLocale(voiceSearchLocale())
+        voiceEngine?.lastError = 0
+        try {
+            speech.startListening(object : SpeechDelegate {
+                override fun onStartOfSpeech() = voiceSearchEvent("listening")
+
+                override fun onSpeechRmsChanged(value: Float) {}
+
+                override fun onSpeechPartialResults(results: List<String>) =
+                    voiceSearchEvent("partial", results.joinToString(" ").trim())
+
+                override fun onSpeechResult(result: String) {
+                    val error = voiceEngine?.lastError ?: 0
+                    val errorText = if (result.isBlank()) voiceSearchErrorText(error) else null
+                    if (errorText != null) voiceSearchEvent("error", errorText)
+                    else voiceSearchEvent("result", result.trim())
+                }
+            })
+        } catch (_: SpeechRecognitionNotAvailable) {
+            recognizeVoiceSearchByIntent()
+            return
+        } catch (_: GoogleVoiceTypingDisabledException) {
+            recognizeVoiceSearchByIntent()
+            return
+        }
+        // Движок молча отбивает старт чаще раза в 1,2 с — кнопку отпускаем
+        if (!speech.isListening) voiceSearchEvent("cancel")
+    }
+
+    private fun recognizeVoiceSearchByIntent() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, voiceSearchLocale().toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_PROMPT, getString(R.string.search_voice_hint))
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+        }
+        try {
+            voiceSearchByIntent = true
+            speechLauncher.launch(intent)
+        } catch (_: Exception) {
+            voiceSearchByIntent = false
+            voiceSearchEvent("error", getString(R.string.search_no_voice_recognizer))
+        }
+    }
+
+    /**
+     * Язык распознавания. Интерфейс русский, и названия ищутся по-русски,
+     * поэтому русский — кроме устройств на украинском, белорусском и казахском.
+     */
+    private fun voiceSearchLocale(): Locale = when (Locale.getDefault().language) {
+        "uk" -> Locale("uk", "UA")
+        "be" -> Locale("be", "BY")
+        "kk" -> Locale("kk", "KZ")
+        else -> Locale("ru", "RU")
+    }
+
+    // Колбэки движка приходят и из его таймера, а WebView — только из UI-потока
+    private fun voiceSearchEvent(event: String, text: String = "") = runOnUiThread {
+        runVoidJsFunc(
+            "window.onAndroidVoiceSearch",
+            JSONObject.quote(event) + ", " + JSONObject.quote(text)
+        )
     }
 
     private fun showFab(show: Boolean = true) {

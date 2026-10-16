@@ -76,6 +76,8 @@
     <string name="search_no_voice_recognizer">Нет приложений для распознавания голоса</string>
     <string name="search_requires_record_audio">Приложению требуется разрешение на запись звука, чтобы использовать эту функцию!</string>
     <string name="search_voice_hint">Произнесите запрос</string>
+    <string name="voice_search_error_network">Нет связи со службой распознавания речи</string>
+    <string name="voice_search_error_mic">Не удалось включить микрофон</string>
     <string name="update_app_found">Доступно обновление %s</string>
     <string name="update_install">Установить</string>
     <string name="update_cur_version">Установленная версия</string>

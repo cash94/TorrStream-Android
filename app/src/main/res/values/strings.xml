@@ -78,6 +78,8 @@
     <string name="search_no_voice_recognizer">No voice recognition apps</string>
     <string name="search_requires_record_audio">The app requires permission to record audio to use this feature!</string>
     <string name="search_voice_hint">Say your request</string>
+    <string name="voice_search_error_network">No connection to the speech recognition service</string>
+    <string name="voice_search_error_mic">Could not access the microphone</string>
     <string name="update_app_found">Update available %s</string>
     <string name="update_install">Install</string>
     <string name="update_cur_version">Installed version</string>

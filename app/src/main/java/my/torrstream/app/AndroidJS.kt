@@ -216,6 +216,19 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     @JavascriptInterface
     fun tsDiscoverStatus(): String = TorrServerDiscovery.statusJson()
 
+    // Голосовой ввод в строку поиска (app.js: setupVoiceSearch). Есть ли метод —
+    // по нему веб решает, показывать ли микрофон; итог приходит в
+    // window.onAndroidVoiceSearch
+    @JavascriptInterface
+    fun voiceSearchStart() {
+        mainActivity.runOnUiThread { mainActivity.startVoiceSearch() }
+    }
+
+    @JavascriptInterface
+    fun voiceSearchStop() {
+        mainActivity.runOnUiThread { mainActivity.stopVoiceSearch() }
+    }
+
     // https://stackoverflow.com/a/41560207
     // https://copyprogramming.com/howto/android-webview-savestate
     @JavascriptInterface

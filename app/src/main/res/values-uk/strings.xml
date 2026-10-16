@@ -76,6 +76,8 @@
     <string name="search_no_voice_recognizer">Немає додатків для розпізнавання голосу</string>
     <string name="search_requires_record_audio">Для використання цієї функції додатку потрібен дозвіл на запис аудіо!</string>
     <string name="search_voice_hint">Скажіть свій запит</string>
+    <string name="voice_search_error_network">Немає зв’язку зі службою розпізнавання мовлення</string>
+    <string name="voice_search_error_mic">Не вдалося увімкнути мікрофон</string>
     <string name="update_app_found">Доступне оновлення %s</string>
     <string name="update_install">Встановити</string>
     <string name="update_cur_version">Встановлена версія</string>
