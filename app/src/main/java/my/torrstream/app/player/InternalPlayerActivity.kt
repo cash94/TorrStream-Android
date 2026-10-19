@@ -5,7 +5,11 @@ import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.content.Context
 import android.content.Intent
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -248,9 +252,36 @@ class InternalPlayerActivity : AppCompatActivity() {
      */
     private var pcmAudioFallback = false
 
-    /** Режим вывода звука с учётом отката: одна из констант Prefs.AUDIO_*. */
+    /**
+     * Звуковой выход отказал и в PCM (так бывает с USB-ЦАП) или звук не декодировался —
+     * доигрываем стерео 16 бит 48 кГц, звук декодирует FFmpeg. Только для этого файла.
+     */
+    private var safeAudioFallback = false
+
+    /** Звук уходит на USB-ЦАП — снимается при каждой сборке плеера, см. [AudioOutput.isUsbOutput]. */
+    private var usbAudio = false
+
+    /** Режим вывода звука с учётом отката и USB: одна из констант Prefs.AUDIO_*. */
     private val audioMode: Int
-        get() = if (pcmAudioFallback) Prefs.AUDIO_PCM else playerAudioMode
+        get() = if (pcmAudioFallback || safeAudioFallback || usbAudio) Prefs.AUDIO_PCM else playerAudioMode
+
+    private val audioLimit: AudioOutput.Limit
+        get() = when {
+            safeAudioFallback -> AudioOutput.Limit.SAFE
+            usbAudio -> AudioOutput.Limit.STEREO
+            else -> AudioOutput.Limit.NONE
+        }
+
+    /** USB-ЦАП подключили или отключили посреди фильма — пересобрать выход под него. */
+    private val audioDeviceCallback by lazy {
+        object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) =
+                onAudioDevicesChanged(addedDevices)
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) =
+                onAudioDevicesChanged(removedDevices)
+        }
+    }
 
     /**
      * Играет ли сейчас libVLC. Включается настройкой «Движок» или сам, когда ExoPlayer не
@@ -526,6 +557,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         }
 
         lastFocusedButton = btnPlayPause
+        registerAudioDeviceCallback()
     }
 
     /** Фокус цвета из «Внешнего вида» веба — на кнопках, полосе перемотки и «Пропустить». */
@@ -601,6 +633,7 @@ class InternalPlayerActivity : AppCompatActivity() {
      */
     private fun buildRenderersFactory(): DefaultRenderersFactory {
         val audioMode = audioMode
+        val audioLimit = audioLimit
         val factory = object : DefaultRenderersFactory(this) {
             // Режим «Вывод звука»: PCM или битстрим решает выход, а не рендерер — рендерер
             // сам переходит на декодер, когда выход формат как есть не берёт.
@@ -609,12 +642,12 @@ class InternalPlayerActivity : AppCompatActivity() {
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
             ): AudioSink? = AudioOutput.buildExoAudioSink(
-                context, audioMode, enableFloatOutput, enableAudioTrackPlaybackParams,
+                context, audioMode, audioLimit, enableFloatOutput, enableAudioTrackPlaybackParams,
             ) ?: super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
         }
-        Log.i(TAG, "Audio output mode $audioMode")
+        Log.i(TAG, "Audio output mode $audioMode, limit $audioLimit")
         val mode = if (softwareVideoFallback) Prefs.DECODER_SOFTWARE else playerDecoderMode
-        return when (mode) {
+        val configured = when (mode) {
             Prefs.DECODER_HARDWARE -> factory
                 .setEnableDecoderFallback(false)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
@@ -634,6 +667,38 @@ class InternalPlayerActivity : AppCompatActivity() {
                 .setEnableDecoderFallback(true)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         }
+        // Откат звука: FFmpeg первым — у него нет своих причуд с выходом, как у декодеров
+        // Dolby/DTS в прошивках. Видео это не касается: видеодекодеров в FFmpeg-модуле нет.
+        return if (safeAudioFallback) {
+            configured
+                .setEnableDecoderFallback(true)
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        } else configured
+    }
+
+    private fun registerAudioDeviceCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        (getSystemService(AUDIO_SERVICE) as? AudioManager)?.registerAudioDeviceCallback(audioDeviceCallback, handler)
+    }
+
+    private fun unregisterAudioDeviceCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        (getSystemService(AUDIO_SERVICE) as? AudioManager)?.unregisterAudioDeviceCallback(audioDeviceCallback)
+    }
+
+    /**
+     * Сразу после регистрации система сообщает обо всех уже подключённых устройствах — тогда
+     * USB совпадает с тем, под что собран плеер, и пересобирать нечего.
+     */
+    private fun onAudioDevicesChanged(devices: Array<out AudioDeviceInfo>) {
+        if (devices.none { AudioOutput.isUsbDevice(it) }) return
+        val usb = AudioOutput.isUsbOutput(this)
+        if (usb == usbAudio || player == null) return
+        Log.i(TAG, "USB audio ${if (usb) "connected" else "disconnected"}, rebuilding audio output")
+        // Откаты были под прежний выход
+        pcmAudioFallback = false
+        safeAudioFallback = false
+        restartPlayer("USB audio change")
     }
 
     /**
@@ -810,9 +875,10 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     /** Выход звука собирается вместе с плеером — пересобираем с той же позиции. */
     private fun applyAudioMode(mode: Int) {
-        if (mode == playerAudioMode && !pcmAudioFallback) return
+        if (mode == playerAudioMode && !pcmAudioFallback && !safeAudioFallback) return
         playerAudioMode = mode
         pcmAudioFallback = false
+        safeAudioFallback = false
         restartPlayer("audio mode $mode")
     }
 
@@ -1169,6 +1235,14 @@ class InternalPlayerActivity : AppCompatActivity() {
             seekOverlay.visibility = View.GONE
         }
         if (skipVisible) skipContainer.post { positionSkipButton() }
+        if (!visible && wasVisible) {
+            // ХУД снова откроется на воспроизведении/паузе, как в веб-плеере: иначе двойное ОК
+            // «показать и поставить паузу» нажимало кнопку, оставшуюся с прошлого раза, —
+            // например, перемотку на 10 секунд. Фокус переносится при показе, а не сейчас:
+            // фокус на кнопке сам показывает ХУД (focusTracker).
+            lastFocusedButton = btnPlayPause
+            seekBar.nextFocusDownId = btnPlayPause.id
+        }
         if (visible && !wasVisible) {
             // A live skip offer keeps the remote — it expires, the control bar doesn't.
             if (!skipButtonFocused) (lastFocusedButton ?: btnPlayPause).requestFocus()
@@ -1969,6 +2043,7 @@ class InternalPlayerActivity : AppCompatActivity() {
     // region player
 
     private fun initPlayer() {
+        usbAudio = AudioOutput.isUsbOutput(this)
         val headers = intent.getStringArrayExtra(Extras.HEADERS).toHeaderMap()
         val newPlayer = if (usingVlc) buildVlcPlayer(headers) else buildExoPlayer(headers)
 
@@ -2245,6 +2320,20 @@ class InternalPlayerActivity : AppCompatActivity() {
                 return
             }
 
+            // Выход отказал и в PCM — так бывает с USB-ЦАП (многоканальный звук, 24 бита,
+            // 96 кГц) — или звук не декодировался: ещё раз с самым простым выходом, а libVLC —
+            // только если не поможет и это
+            if (!usingVlc &&
+                !safeAudioFallback &&
+                (error.errorCode in AUDIO_OUTPUT_ERRORS || error.isAudioDecoderError())
+            ) {
+                safeAudioFallback = true
+                Log.w(TAG, "Audio failed (USB: $usbAudio), retrying stereo 16-bit: ${error.errorCodeName}")
+                App.toast(R.string.player_audio_safe_fallback, true)
+                handler.post { restartPlayer("safe audio fallback") }
+                return
+            }
+
             // Последний шаг перед отказом: libVLC со своим FFmpeg — тем же, чем внешние плееры
             // играют AVI с XviD/DivX. Сюда же — контейнер, который ExoPlayer не разбирает.
             if (!usingVlc && error.isVlcWorthTrying()) {
@@ -2292,6 +2381,9 @@ class InternalPlayerActivity : AppCompatActivity() {
                 PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
                 PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
             )
+
+        private fun PlaybackException.isAudioDecoderError(): Boolean = isDecoderError() &&
+                (this as? ExoPlaybackException)?.rendererFormat?.sampleMimeType?.startsWith("audio/") == true
 
         private fun PlaybackException.isDecoderError(): Boolean = errorCode in setOf(
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
@@ -2395,6 +2487,7 @@ class InternalPlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        unregisterAudioDeviceCallback()
         handler.removeCallbacksAndMessages(null)
         releasePlayer()
         super.onDestroy()

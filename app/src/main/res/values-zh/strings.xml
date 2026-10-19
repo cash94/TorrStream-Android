@@ -81,6 +81,7 @@
     <string name="player_audio_passthrough">直通（passthrough）</string>
     <string name="player_audio_passthrough_desc">AC3、E-AC3 和 DTS 始终不解码直接发送到功放。功放不支持时将没有声音</string>
     <string name="player_audio_pcm_fallback">音频直通失败 - 改为解码为 PCM</string>
+    <string name="player_audio_safe_fallback">音频输出失败 - 改为 16 位立体声重试</string>
     <string name="player_switching_vlc">设备无法解码此文件 - 切换到 VLC</string>
     <string name="player_decoder_combined">混合</string>
     <string name="player_decoder_hardware">硬件</string>

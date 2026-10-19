@@ -81,6 +81,7 @@
     <string name="player_audio_passthrough">Пряме виведення (passthrough)</string>
     <string name="player_audio_passthrough_desc">AC3, E-AC3 і DTS завжди йдуть на ресивер без декодування. Без звуку, якщо ресивер їх не приймає</string>
     <string name="player_audio_pcm_fallback">Пряме виведення звуку не вдалося — декодую в PCM</string>
+    <string name="player_audio_safe_fallback">Звуковий вихід не впорався — повторюю в стерео 16 біт</string>
     <string name="player_switching_vlc">Пристрій не може декодувати цей файл - перемикаюся на VLC</string>
     <string name="player_decoder_combined">Комбінований</string>
     <string name="player_decoder_hardware">Апаратний</string>

@@ -99,6 +99,7 @@ import my.torrstream.app.helpers.Prefs.appPlayer
 import my.torrstream.app.helpers.Updater
 import my.torrstream.app.helpers.Prefs.appPrefs
 import my.torrstream.app.helpers.Prefs.appUrl
+import my.torrstream.app.helpers.Prefs.backHoldExit
 import my.torrstream.app.helpers.Prefs.defPrefs
 import my.torrstream.app.helpers.Prefs.firstRun
 import my.torrstream.app.helpers.Prefs.lampaSource
@@ -394,14 +395,18 @@ class MainActivity : BaseActivity(),
         return super.onKeyDown(keyCode, event)
     }
 
+    // Удержание «Назад» — меню приложения или, если так выбрано в «Об устройстве», выход
     override fun onKeyLongPress(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            logDebug("Back button long pressed")
-            showMenuDialog()
+            logDebug("Back button long pressed, exit=$backHoldExit")
+            if (backHoldExit) appExit() else showMenuDialog()
             return true
         }
         return super.onKeyLongPress(keyCode, event)
     }
+
+    /** Меню приложения по кнопке из веба — когда удержание «Назад» занято выходом. */
+    fun openAppMenu() = showMenuDialog()
 
     override fun onBrowserInitCompleted() {
         browserInitComplete = true

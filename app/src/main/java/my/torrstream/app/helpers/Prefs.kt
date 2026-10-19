@@ -31,6 +31,7 @@ object Prefs {
     private const val PLAYER_DECODER_KEY = "player_decoder"
     private const val PLAYER_ENGINE_KEY = "player_engine"
     private const val PLAYER_AUDIO_KEY = "player_audio"
+    private const val BACK_HOLD_EXIT_KEY = "back_hold_exit"
 
     /** Hardware first, software picked up whenever hardware cannot handle the track. */
     const val DECODER_COMBINED = 0
@@ -103,6 +104,14 @@ object Prefs {
         set(url) = appPrefs.edit {putString(TMDB_IMG_KEY, url) }
 
     /** Built-in player: overlay clock in the top corner. */
+    /**
+     * Удержание «Назад»: выход из приложения (true) или меню приложения (false, как было).
+     * Переключатель — в «Об устройстве» веб-интерфейса (AndroidJS.setBackHoldExit).
+     */
+    var Context.backHoldExit: Boolean
+        get() = appPrefs.getBoolean(BACK_HOLD_EXIT_KEY, false)
+        set(value) = appPrefs.edit { putBoolean(BACK_HOLD_EXIT_KEY, value) }
+
     var Context.playerShowClock: Boolean
         get() = appPrefs.getBoolean(PLAYER_CLOCK_KEY, true)
         set(value) = appPrefs.edit { putBoolean(PLAYER_CLOCK_KEY, value) }

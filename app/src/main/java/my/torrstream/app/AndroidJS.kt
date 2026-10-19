@@ -16,6 +16,7 @@ import org.json.JSONObject
 import my.torrstream.app.browser.Browser
 import my.torrstream.app.helpers.Helpers.debugLog
 import my.torrstream.app.helpers.Prefs.appLang
+import my.torrstream.app.helpers.Prefs.backHoldExit
 import my.torrstream.app.helpers.Prefs.storagePrefs
 import my.torrstream.app.torrserver.TorrServerDiscovery
 import my.torrstream.app.torrserver.TorrServerManager
@@ -215,6 +216,21 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     /** JSON: идёт ли поиск и найденные серверы (name, url, version, self) */
     @JavascriptInterface
     fun tsDiscoverStatus(): String = TorrServerDiscovery.statusJson()
+
+    // «Об устройстве» (app.js: setupAndroidAppSettings): что делает удержание «Назад» —
+    // выход из приложения или меню приложения. Меню тогда открывается кнопкой рядом
+    @JavascriptInterface
+    fun getBackHoldExit(): Boolean = mainActivity.backHoldExit
+
+    @JavascriptInterface
+    fun setBackHoldExit(enabled: Boolean) {
+        mainActivity.backHoldExit = enabled
+    }
+
+    @JavascriptInterface
+    fun openAppMenu() {
+        mainActivity.runOnUiThread { mainActivity.openAppMenu() }
+    }
 
     // Голосовой ввод в строку поиска (app.js: setupVoiceSearch). Есть ли метод —
     // по нему веб решает, показывать ли микрофон; итог приходит в

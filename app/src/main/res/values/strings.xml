@@ -83,6 +83,7 @@
     <string name="player_audio_passthrough">Passthrough</string>
     <string name="player_audio_passthrough_desc">AC3, E-AC3 and DTS always go to the receiver undecoded. No sound if the receiver does not accept them</string>
     <string name="player_audio_pcm_fallback">Audio passthrough failed — decoding to PCM</string>
+    <string name="player_audio_safe_fallback">Audio output failed — retrying in stereo, 16-bit</string>
     <string name="player_switching_vlc">The device cannot decode this file - switching to VLC</string>
     <string name="player_decoder_combined">Combined</string>
     <string name="player_decoder_hardware">Hardware</string>
