@@ -72,6 +72,7 @@ import net.gotev.speech.engine.DummyOnInitListener
 import net.gotev.speech.ui.SpeechProgressView
 import org.json.JSONException
 import org.json.JSONObject
+import org.json.JSONTokener
 import my.torrstream.app.browser.Browser
 import my.torrstream.app.browser.ImageCache
 import my.torrstream.app.browser.SysView
@@ -485,6 +486,7 @@ class MainActivity : BaseActivity(),
                 }
                 cacheWebClientId()
                 cacheWebFocusColor()
+                cacheWebTorrServer()
                 publishSafeArea()
                 // Background update Android TV channels and recommendations
                 withContext(Dispatchers.Default) {
@@ -2597,6 +2599,30 @@ class MainActivity : BaseActivity(),
         browser?.evaluateJavascript(js) { raw ->
             webFocusColor = raw?.trim()?.removeSurrounding("\"")
                 ?.takeIf { it.startsWith("#") }
+        }
+    }
+
+    /**
+     * Где искать TorrServer для канала «Мои торренты»: свой TorrServer устройства веб держит в
+     * localStorage (tsLocalOnly + tsLocalConfig), общий — в настройках клиента на сервере.
+     */
+    private fun cacheWebTorrServer() {
+        if (VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val js = "(function(){try{var local=localStorage.getItem('tsLocalOnly')==='1';" +
+                "return JSON.stringify({clientId:localStorage.getItem('clientId')," +
+                "local:local?localStorage.getItem('tsLocalConfig'):null})}catch(e){return null}})()"
+        browser?.evaluateJavascript(js) { raw ->
+            val json = try {
+                // evaluateJavascript отдаёт строку JSON-литералом: "{\"clientId\":…}"
+                JSONObject(JSONTokener(raw ?: return@evaluateJavascript).nextValue() as? String
+                    ?: return@evaluateJavascript)
+            } catch (e: JSONException) {
+                return@evaluateJavascript
+            }
+            Channels.rememberWebTorrServer(
+                json.optString("clientId").takeIf { it.isNotBlank() && it != "null" },
+                json.optString("local").takeIf { it.startsWith("{") },
+            )
         }
     }
 

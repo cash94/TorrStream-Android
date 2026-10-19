@@ -42,8 +42,10 @@ object WatchNext {
         dismissedPrefs.edit().putLong(activityKey, atMillis).apply()
     }
 
+    // Ссылку на постер прислал веб — с зеркалом, которое лаунчеру могло быть недоступно (http
+    // или зеркало без https), поэтому путь TMDB переносим на зеркало, выбранное для каналов
     private fun LampaCard.posterUri(): Uri? =
-        img?.takeIf { it.isNotEmpty() }?.let { Uri.parse(it) }
+        img?.takeIf { it.isNotEmpty() }?.let { Uri.parse(PosterMirror.rewrite(it)) }
 
     /**
      * Rebuilds a `{"movie": {...LampaCard...}}` blob shaped like MainActivity.getCardFromActivity()

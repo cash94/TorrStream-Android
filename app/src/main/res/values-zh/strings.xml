@@ -32,6 +32,11 @@
     <string name="player_episodes">剧集列表</string>
     <string name="player_mute">静音</string>
     <string name="player_resize">屏幕缩放</string>
+    <string name="player_scale_contain">适应</string>
+    <string name="player_scale_fill">拉伸</string>
+    <string name="player_scale_cover">裁剪</string>
+    <string name="player_scale_zoom">放大</string>
+    <string name="player_scale_original">原始</string>
     <string name="player_subtitles_off">关闭</string>
     <string name="player_no_tracks">没有可用轨道</string>
     <string name="player_episode_number">第 %1$d 集</string>

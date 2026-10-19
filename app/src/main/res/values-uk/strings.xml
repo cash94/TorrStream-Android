@@ -32,6 +32,11 @@
     <string name="player_episodes">Епізоди</string>
     <string name="player_mute">Звук</string>
     <string name="player_resize">Масштаб екрана</string>
+    <string name="player_scale_contain">Зі смугами</string>
+    <string name="player_scale_fill">Розтягнути</string>
+    <string name="player_scale_cover">Обрізка</string>
+    <string name="player_scale_zoom">Збільшити</string>
+    <string name="player_scale_original">Оригінал</string>
     <string name="player_subtitles_off">Вимкнути</string>
     <string name="player_no_tracks">Доріжок немає</string>
     <string name="player_episode_number">Епізод %1$d</string>

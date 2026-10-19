@@ -19,7 +19,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:focusable="false"
-        app:resize_mode="fit"
+        app:resize_mode="fill"
         app:use_controller="false" />
 
     <ProgressBar
@@ -303,6 +303,23 @@
         android:paddingEnd="@dimen/hud_alert_pad_h"
         android:paddingBottom="@dimen/hud_alert_pad_v"
         android:text="@string/player_exit_again"
+        android:textColor="@android:color/white"
+        android:textSize="@dimen/hud_alert_text"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <!-- Название режима масштаба после нажатия кнопки — как showToast веб-плеера -->
+    <TextView
+        android:id="@+id/scaleToast"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:background="@drawable/hud_alert_bg"
+        android:maxLines="1"
+        android:paddingStart="@dimen/hud_alert_pad_h"
+        android:paddingTop="@dimen/hud_alert_pad_v"
+        android:paddingEnd="@dimen/hud_alert_pad_h"
+        android:paddingBottom="@dimen/hud_alert_pad_v"
         android:textColor="@android:color/white"
         android:textSize="@dimen/hud_alert_text"
         android:textStyle="bold"

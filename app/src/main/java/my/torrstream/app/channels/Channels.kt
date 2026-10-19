@@ -16,7 +16,10 @@ import androidx.tvprovider.media.tv.ChannelLogoUtils
 import androidx.tvprovider.media.tv.PreviewChannel
 import androidx.tvprovider.media.tv.PreviewProgram
 import androidx.tvprovider.media.tv.TvContractCompat
+import okhttp3.Credentials
+import okhttp3.MediaType
 import okhttp3.Request
+import okhttp3.RequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import my.torrstream.app.App
@@ -43,6 +46,11 @@ import my.torrstream.app.net.HttpHelper
  * «Показать канал?», ни настройки каналов у него нет. Поэтому там канал один — общий: в
  * нём карточки выбранных в меню категорий (до [GTV_MAX_KEYS]), поровну на [ITEMS_PER_CHANNEL]
  * мест. Одна категория — 30 её карточек и её название, десять — по три, канал «TorrStream».
+ *
+ * «Мои торренты» ([Source.TORRENTS]) — список раздач TorrServer, тот же, что на вкладке веба.
+ * Адрес TorrServer живёт в вебе: свой TorrServer устройства — в localStorage, общий — в
+ * настройках клиента на сервере; MainActivity передаёт сюда, где искать ([rememberWebTorrServer]).
+ * Карточка открывает карточку торрента по хешу, как «Продолжить просмотр».
  */
 @RequiresApi(Build.VERSION_CODES.O)
 object Channels {
@@ -53,20 +61,24 @@ object Channels {
 
     private const val ITEMS_PER_CHANNEL = 30
     private const val REFRESH_INTERVAL_MS = 3 * 60 * 60 * 1000L // сервер обновляет подборки раз в сутки
-    private const val DEFAULT_IMAGE_HOST = "tsimg.torrstream.online"
     private const val POSTER_SIZE = "w342"
+
+    /** Зеркала постеров, если сервер не ответил, — как DEFAULTS.tmdbImages в api-proxy.js. */
+    private val DEFAULT_IMAGE_HOSTS = listOf("tsimg.torrstream.online", "nl.imagetmdb.com", "mocha.stull.xyz")
 
     private const val PREF_UPDATED_AT = "updated_at"
     private const val PREF_SERVER = "server"
     private const val PREF_DISABLED = "disabled"
     private const val PREF_GTV_KEYS = "gtv_keys"
+    private const val PREF_TS_CLIENT_ID = "ts_client_id"
+    private const val PREF_TS_LOCAL = "ts_local_config"
 
     /** Сколько категорий можно сложить в общий канал Google TV. */
     const val GTV_MAX_KEYS = 10
     private const val GOOGLE_TV_LAUNCHER = "com.google.android.apps.tv.launcherx"
     private const val MIXED_CHANNEL_NAME = "TorrStream"
 
-    enum class Source { TMDB, KINOPOISK, CATALOG, RUS }
+    enum class Source { TMDB, KINOPOISK, CATALOG, RUS, TORRENTS }
 
     class Def(val key: String, val name: String, val source: Source, val mediaType: String = "movie") {
         val providerId get() = "ch_$key"
@@ -76,6 +88,7 @@ object Channels {
             Source.KINOPOISK -> "/api/kinopoisk/collection?preset=$key"
             Source.CATALOG -> "/api/catalog/$key/items?from=0&limit=$ITEMS_PER_CHANNEL"
             Source.RUS -> "/api/rus/items?from=0&limit=$ITEMS_PER_CHANNEL"
+            Source.TORRENTS -> "/torrents" // у TorrServer, а не у сервера TorrStream
         }
     }
 
@@ -83,10 +96,12 @@ object Channels {
      * Порядок и названия — как в веб-интерфейсе: HOME_ROWS в public/js/home.js (без
      * «Продолжить просмотр» — для него есть системный ряд Watch Next, см. [WatchNext]) и
      * CATALOG_CONFIG в public/js/catalog.js (без «Истории» и «Избранного»: они живут в
-     * браузере). Поменялись ряды там — поправить и здесь.
+     * браузере). Поменялись ряды там — поправить и здесь. «Мои торренты» — вкладка веба,
+     * вторым каналом: первым должен оставаться [DEFAULT_KEY] (см. updateGoogleTv).
      */
     val DEFS: List<Def> = listOf(
         Def("trending_week", "В тренде на этой неделе", Source.TMDB),
+        Def("my_torrents", "Мои торренты", Source.TORRENTS),
         Def("pop_streaming", "Что популярно · Онлайн", Source.TMDB),
         Def("pop_ontv", "Что популярно · По ТВ", Source.TMDB),
         Def("pop_rent", "Что популярно · Напрокат", Source.TMDB),
@@ -129,8 +144,12 @@ object Channels {
         val year: String?,
         /** Категория карточки в общем канале Google TV — пишется в описание. */
         val category: String? = null,
+        /** Раздача TorrServer («Мои торренты»): открывается карточка торрента. */
+        val hash: String? = null,
+        /** id TMDB раздачи, если веб его сохранил, — запасной путь, если раздачу удалят. */
+        val tmdbId: String? = null,
     ) {
-        fun withCategory(name: String) = Card(id, mediaType, title, poster, overview, year, name)
+        fun withCategory(name: String) = Card(id, mediaType, title, poster, overview, year, name, hash, tmdbId)
     }
 
     private val prefs get() = App.context.getSharedPreferences("tv_channels", MODE_PRIVATE)
@@ -184,14 +203,14 @@ object Channels {
      * Карточки идут по кругу (первая каждой категории, вторая каждой…), чтобы в видимой части
      * ряда были все категории; повторы фильма между категориями пропускаются.
      */
-    private fun updateGoogleTv(server: String, imageHost: String, published: Map<String, Long>): Int {
+    private fun updateGoogleTv(server: String, images: PosterMirror.Resolver, published: Map<String, Long>): Int {
         val defs = googleTvKeys().mapNotNull { key -> DEFS.firstOrNull { it.key == key } }
         val perCategory = ITEMS_PER_CHANNEL / defs.size.coerceAtLeast(1)
         val mixed = defs.size > 1
 
         val lists = defs.mapNotNull { def ->
             val cards = try {
-                fetchCards(server, def, imageHost)
+                fetchCards(server, def, images)
             } catch (e: Exception) {
                 Log.w(TAG, "${def.key}: ${e.message}")
                 null
@@ -291,16 +310,21 @@ object Channels {
         val now = System.currentTimeMillis()
         val fresh = now - prefs.getLong(PREF_UPDATED_AT, 0L) < REFRESH_INTERVAL_MS &&
                 prefs.getString(PREF_SERVER, null) == server
-        if (!force && fresh) return true
+        val images = PosterMirror.Resolver { fetchImageHosts(server) }
+        // Подборки сервер обновляет раз в сутки, а раздачи добавляют когда угодно: в
+        // промежутках между полными обновлениями — только «Мои торренты»
+        if (!force && fresh) {
+            if (!isGoogleTv) updateTorrentsOnly(server, images)
+            return true
+        }
 
         try {
-            val imageHost = fetchImageHost(server)
             val disabled = disabledKeys()
             val published = publishedChannels()
             var ok = 0
 
             if (isGoogleTv) {
-                ok = updateGoogleTv(server, imageHost, published)
+                ok = updateGoogleTv(server, images, published)
                 if (ok > 0) prefs.edit {
                     putLong(PREF_UPDATED_AT, now)
                     putString(PREF_SERVER, server)
@@ -314,21 +338,7 @@ object Channels {
                     published[def.key]?.let { deleteChannel(it) }
                     return@forEach
                 }
-                val cards = try {
-                    fetchCards(server, def, imageHost)
-                } catch (e: Exception) {
-                    Log.w(TAG, "${def.key}: ${e.message}")
-                    null
-                } ?: return@forEach // сеть подвела — старые карточки остаются как есть
-
-                if (cards.isEmpty()) {
-                    // Модуль не установлен или каталог пуст: пустой канал лаунчеру не нужен
-                    published[def.key]?.let { deleteChannel(it) }
-                    return@forEach
-                }
-                val channelId = published[def.key] ?: createChannel(def) ?: return@forEach
-                syncPrograms(channelId, def, cards)
-                ok++
+                if (publishChannel(server, def, images, published)) ok++
             }
 
             // Каналы, которых больше нет в списке (переименовали ключ, убрали ряд)
@@ -344,6 +354,53 @@ object Channels {
         } catch (e: Exception) {
             Log.e(TAG, "update failed", e)
             return false
+        }
+    }
+
+    /** Карточки одного канала. false — канал не обновлён (сеть) или удалён как пустой. */
+    private fun publishChannel(
+        server: String,
+        def: Def,
+        images: PosterMirror.Resolver,
+        published: Map<String, Long>,
+    ): Boolean {
+        val cards = try {
+            fetchCards(server, def, images)
+        } catch (e: Exception) {
+            Log.w(TAG, "${def.key}: ${e.message}")
+            null
+        } ?: return false // сеть подвела — старые карточки остаются как есть
+
+        if (cards.isEmpty()) {
+            // Модуль не установлен, каталог пуст или раздач нет: пустой канал лаунчеру не нужен
+            published[def.key]?.let { deleteChannel(it) }
+            return false
+        }
+        val channelId = published[def.key] ?: createChannel(def) ?: return false
+        syncPrograms(channelId, def, cards)
+        return true
+    }
+
+    private fun updateTorrentsOnly(server: String, images: PosterMirror.Resolver) {
+        try {
+            val disabled = disabledKeys()
+            val published = publishedChannels()
+            DEFS.filter { it.source == Source.TORRENTS && it.key !in disabled }
+                .forEach { publishChannel(server, it, images, published) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Мои торренты не обновлены", e)
+        }
+    }
+
+    /**
+     * Где веб держит адрес TorrServer: свой TorrServer устройства — его настройки из
+     * localStorage ([localConfig], JSON {url, authEnabled, login, password}), иначе — настройки
+     * клиента [clientId] на сервере. Зовёт MainActivity после загрузки страницы.
+     */
+    fun rememberWebTorrServer(clientId: String?, localConfig: String?) {
+        prefs.edit {
+            if (clientId.isNullOrBlank()) remove(PREF_TS_CLIENT_ID) else putString(PREF_TS_CLIENT_ID, clientId)
+            if (localConfig.isNullOrBlank()) remove(PREF_TS_LOCAL) else putString(PREF_TS_LOCAL, localConfig)
         }
     }
 
@@ -491,7 +548,12 @@ object Channels {
 
     private fun cardIntent(card: Card): Intent {
         val json = JSONObject().apply {
-            put("id", card.id)
+            if (card.hash != null) {
+                put("hash", card.hash)
+                put("id", card.tmdbId ?: "")
+            } else {
+                put("id", card.id)
+            }
             put("media_type", card.mediaType)
             put("title", card.title)
             put("poster", card.poster)
@@ -536,16 +598,22 @@ object Channels {
         }
     }
 
-    /** Основное зеркало картинок TMDB — то же, что у веб-интерфейса (/api/client-config). */
-    private fun fetchImageHost(server: String): String = try {
-        getJson("$server/api/client-config")?.optJSONArray("tmdbImages")
-            ?.optString(0)?.takeIf { it.isNotBlank() } ?: DEFAULT_IMAGE_HOST
-    } catch (e: Exception) {
-        DEFAULT_IMAGE_HOST
+    /** Зеркала картинок TMDB — те же, что у веб-интерфейса (/api/client-config). */
+    private fun fetchImageHosts(server: String): List<String> {
+        val list = try {
+            getJson("$server/api/client-config")?.optJSONArray("tmdbImages")
+        } catch (e: Exception) {
+            null
+        }
+        val hosts = (0 until (list?.length() ?: 0)).mapNotNull { i ->
+            list?.optString(i)?.trim()?.takeIf { it.isNotEmpty() }
+        }
+        return hosts.ifEmpty { DEFAULT_IMAGE_HOSTS }
     }
 
     /** Пустой список — у ряда нет карточек (или модуль не установлен); null — ошибка сети. */
-    private fun fetchCards(server: String, def: Def, imageHost: String): List<Card>? {
+    private fun fetchCards(server: String, def: Def, images: PosterMirror.Resolver): List<Card>? {
+        if (def.source == Source.TORRENTS) return fetchTorrents(server, def, images)
         val json = try {
             getJson(server + def.path())
         } catch (e: Exception) {
@@ -553,10 +621,99 @@ object Channels {
             return null
         } ?: return emptyList()
         val items = json.optJSONArray("items") ?: return emptyList()
-        return parseCards(items, def, imageHost)
+        return parseCards(items, def, images)
     }
 
-    private fun parseCards(items: JSONArray, def: Def, imageHost: String): List<Card> {
+    // ==================== МОИ ТОРРЕНТЫ ====================
+
+    private class TorrServer(val url: String, val authorization: String?)
+
+    private val TORRENT_HASH = Regex("^[0-9a-f]{40}$")
+    private val TV_CATEGORIES = listOf("tv", "сериал", "serial", "series")
+
+    /**
+     * Адрес и вход TorrServer — откуда их берёт веб (loadClientConfig в torrents.js). null —
+     * ещё неизвестно (страница не открывалась) или сервер не ответил; пустой адрес —
+     * TorrServer не настроен.
+     */
+    private fun torrServer(server: String): TorrServer? {
+        val config = prefs.getString(PREF_TS_LOCAL, null)
+            ?.let { runCatching { JSONObject(it) }.getOrNull() }
+            ?: run {
+                val clientId = prefs.getString(PREF_TS_CLIENT_ID, null) ?: return null
+                getJson("$server/api/client/config?clientId=${Uri.encode(clientId)}")
+                    ?.optJSONObject("config")
+            }
+            ?: return null
+        var url = config.optString("url").trim().trimEnd('/')
+        if (url.isEmpty()) return TorrServer("", null)
+        if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) url = "http://$url"
+        val login = config.optString("login").trim()
+        val auth = if (config.optBoolean("authEnabled") && login.isNotEmpty()) {
+            Credentials.basic(login, config.optString("password"))
+        } else null
+        return TorrServer(url, auth)
+    }
+
+    /** Раздачи TorrServer, новые первыми. null — TorrServer не ответил, старые карточки остаются. */
+    private fun fetchTorrents(server: String, def: Def, images: PosterMirror.Resolver): List<Card>? {
+        val ts = try {
+            torrServer(server)
+        } catch (e: Exception) {
+            Log.w(TAG, "Настройки TorrServer: $e")
+            null
+        } ?: return null
+        if (ts.url.isEmpty()) return emptyList()
+
+        val body = RequestBody.create(MediaType.parse("application/json"), """{"action":"list"}""")
+        val builder = Request.Builder().url(ts.url + def.path()).post(body)
+        ts.authorization?.let { builder.header("Authorization", it) }
+        val list = try {
+            client.newCall(builder.build()).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "TorrServer ${ts.url}: ${response.code()}")
+                    return null
+                }
+                JSONArray(response.body()?.string() ?: return null)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "TorrServer ${ts.url}: $e")
+            return null
+        }
+
+        val torrents = (0 until list.length()).mapNotNull { list.optJSONObject(it) }
+            .sortedByDescending { it.optLong("timestamp") }
+        val cards = mutableListOf<Card>()
+        for (t in torrents) {
+            if (cards.size >= ITEMS_PER_CHANNEL) break
+            val hash = t.optString("hash").lowercase().takeIf { TORRENT_HASH.matches(it) } ?: continue
+            val title = listOf(t.optString("title"), t.optString("name"))
+                .firstOrNull { it.isNotBlank() && it != "null" } ?: continue
+            // Веб кладёт в data карточку фильма ({movie: {id, img, poster_path}}) и список файлов
+            val data = t.optString("data").takeIf { it.startsWith("{") }
+                ?.let { runCatching { JSONObject(it) }.getOrNull() }
+            val movie = data?.optJSONObject("movie")
+            val poster = listOf(t.optString("poster"), movie?.optString("img"), movie?.optString("poster_path"))
+                .firstNotNullOfOrNull { images.url(it, POSTER_SIZE) } ?: continue
+            // Сериал — как getTorrentMediaTypeFromCard в torrents.js: файлов больше одного или категория
+            val files = data?.optJSONObject("TorrServer")?.optJSONArray("Files")?.length() ?: 0
+            val category = t.optString("category").lowercase()
+            val isTv = files > 1 || TV_CATEGORIES.any { it in category }
+            cards += Card(
+                id = hash,
+                mediaType = if (isTv) "tv" else "movie",
+                title = title,
+                poster = poster,
+                overview = null,
+                year = Regex("(19|20)\\d{2}").find(title)?.value,
+                hash = hash,
+                tmdbId = movie?.opt("id")?.toString()?.takeIf { it.toLongOrNull() != null },
+            )
+        }
+        return cards
+    }
+
+    private fun parseCards(items: JSONArray, def: Def, images: PosterMirror.Resolver): List<Card> {
         val cards = mutableListOf<Card>()
         for (i in 0 until items.length()) {
             if (cards.size >= ITEMS_PER_CHANNEL) break
@@ -566,7 +723,7 @@ object Channels {
             val torrentName = item.optJSONArray("torrent")?.optJSONObject(0)?.optString("name")
             val title = listOf(torrentName, item.optString("title"), item.optString("name"))
                 .firstOrNull { !it.isNullOrBlank() } ?: continue
-            val poster = posterUrl(item.optString("poster_path"), imageHost) ?: continue
+            val poster = images.url(item.optString("poster_path"), POSTER_SIZE) ?: continue
             val date = item.optString("release_date").ifBlank { item.optString("first_air_date") }
             cards += Card(
                 id = id,
@@ -578,19 +735,5 @@ object Channels {
             )
         }
         return cards
-    }
-
-    /**
-     * Постер через зеркало: image.tmdb.org из России открывается не везде, а картинку
-     * лаунчер качает сам. Путь берём и из «/abc.jpg», и из полного URL TMDB.
-     */
-    private fun posterUrl(pathOrUrl: String?, imageHost: String): String? {
-        val value = pathOrUrl?.trim()?.takeIf { it.isNotEmpty() && it != "null" } ?: return null
-        val path = if (value.startsWith("http", ignoreCase = true)) {
-            Regex("/t/p/[^/]+(/[^?#]+)").find(value)?.groupValues?.get(1) ?: return value
-        } else {
-            if (value.startsWith("/")) value else "/$value"
-        }
-        return "https://$imageHost/t/p/$POSTER_SIZE$path"
     }
 }

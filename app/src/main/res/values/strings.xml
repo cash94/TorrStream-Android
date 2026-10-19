@@ -34,6 +34,11 @@
     <string name="player_episodes">Episodes</string>
     <string name="player_mute">Mute</string>
     <string name="player_resize">Screen scaling</string>
+    <string name="player_scale_contain">Letterbox</string>
+    <string name="player_scale_fill">Stretch</string>
+    <string name="player_scale_cover">Crop</string>
+    <string name="player_scale_zoom">Zoom</string>
+    <string name="player_scale_original">Original</string>
     <string name="player_subtitles_off">Off</string>
     <string name="player_no_tracks">No tracks available</string>
     <string name="player_episode_number">Episode %1$d</string>

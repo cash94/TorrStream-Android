@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -53,6 +54,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.Tracks
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -71,7 +73,6 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
-import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import my.torrstream.app.App
 import my.torrstream.app.R
@@ -85,6 +86,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Built-in video player (Media3/ExoPlayer) with a remote-friendly control bar.
@@ -196,11 +198,12 @@ class InternalPlayerActivity : AppCompatActivity() {
             PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
         )
 
-        private val RESIZE_MODES = intArrayOf(
-            AspectRatioFrameLayout.RESIZE_MODE_FIT,
-            AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
-            AspectRatioFrameLayout.RESIZE_MODE_FILL,
-        )
+        /**
+         * «Увеличить»: кадр больше «С полосами» во столько раз, чтобы фильм 2,40:1 с впечатанными
+         * в кадр 16:9 чёрными полосами заполнил экран по высоте, — как ZOOM_FACTOR в app.js.
+         */
+        private const val ZOOM_FACTOR = 2.4f / (16f / 9f)
+        private const val SCALE_TOAST_MS = 1500L
     }
 
     /** ExoPlayer, а для того, что он не может декодировать, — libVLC ([VlcPlayer]). */
@@ -304,7 +307,19 @@ class InternalPlayerActivity : AppCompatActivity() {
     private var sidePanelReplaced = false
 
     private val handler = Handler(Looper.getMainLooper())
-    private var resizeModeIndex = 0
+
+    /** Режимы кнопки масштаба — те же и в том же порядке, что в веб-плеере (app.js). */
+    private enum class VideoScale(val label: Int) {
+        CONTAIN(R.string.player_scale_contain),
+        FILL(R.string.player_scale_fill),
+        COVER(R.string.player_scale_cover),
+        ZOOM(R.string.player_scale_zoom),
+        ORIGINAL(R.string.player_scale_original),
+    }
+
+    private var videoScale = VideoScale.CONTAIN
+    private lateinit var scaleToast: TextView
+    private val hideScaleToast = Runnable { scaleToast.visibility = View.GONE }
 
     private lateinit var playerHint: View
     private lateinit var exitAlert: View
@@ -336,6 +351,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         setContentView(R.layout.activity_internal_player)
         hideSystemUI()
         bindViews()
+        HudScale.apply(findViewById(R.id.playerRoot))
         padControlsForCutout()
         setupControls()
 
@@ -387,6 +403,12 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private fun bindViews() {
         playerView = findViewById(R.id.playerView)
+        // Рамка видео зависит от размера экрана: поворот, мультиоконный режим. Из onLayout
+        // менять разметку нельзя — через post
+        playerView.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+            if (r - l != or - ol || b - t != ob - ot) playerView.post { applyVideoScale() }
+        }
+        scaleToast = findViewById(R.id.scaleToast)
         progressBar = findViewById(R.id.playerProgress)
         titleView = findViewById(R.id.playerTitle)
         headerView = findViewById(R.id.playerHeader)
@@ -1040,9 +1062,56 @@ class InternalPlayerActivity : AppCompatActivity() {
     }
 
     private fun cycleResizeMode() {
-        resizeModeIndex = (resizeModeIndex + 1) % RESIZE_MODES.size
-        playerView.resizeMode = RESIZE_MODES[resizeModeIndex]
+        val modes = VideoScale.values()
+        videoScale = modes[(videoScale.ordinal + 1) % modes.size]
+        applyVideoScale()
+        scaleToast.setText(videoScale.label)
+        scaleToast.visibility = View.VISIBLE
+        handler.removeCallbacks(hideScaleToast)
+        handler.postDelayed(hideScaleToast, SCALE_TOAST_MS)
         showControls()
+    }
+
+    /**
+     * Масштаб задаётся рамкой самой поверхности видео, как applyVideoBox в app.js: рамка
+     * PlayerView растянута на весь экран (resize_mode="fill"), а поверхность получает по
+     * центру прямоугольник нужного размера — и больше экрана, лишнее срезает край окна.
+     *
+     * Режимы AspectRatioFrameLayout (вписать / обрезать / растянуть) для этого не годились:
+     * у кадра 16:9 на экране 16:9 все три дают одну и ту же картинку, и впечатанные в кадр
+     * полосы фильма 2,40:1 (например, 3840×2160) убрать было нечем — кнопка ничего не меняла.
+     * Субтитры остаются в рамке экрана, поэтому и в «Увеличить» не уезжают за край.
+     */
+    private fun applyVideoScale() {
+        val surface = playerView.videoSurfaceView ?: return
+        val screenW = playerView.width
+        val screenH = playerView.height
+        val size = player?.videoSize
+        var w = ViewGroup.LayoutParams.MATCH_PARENT
+        var h = ViewGroup.LayoutParams.MATCH_PARENT
+        if (size != null && size.width > 0 && size.height > 0 && screenW > 0 && screenH > 0 &&
+            videoScale != VideoScale.FILL
+        ) {
+            val pixelRatio = size.pixelWidthHeightRatio.takeIf { it > 0f } ?: 1f
+            val videoW = size.width * pixelRatio
+            val videoH = size.height.toFloat()
+            val fit = min(screenW / videoW, screenH / videoH)
+            val r = when (videoScale) {
+                VideoScale.COVER -> max(screenW / videoW, screenH / videoH)
+                VideoScale.ZOOM -> fit * ZOOM_FACTOR
+                VideoScale.ORIGINAL -> 1f // пиксель кадра — пиксель экрана
+                else -> fit
+            }
+            w = (videoW * r).roundToInt()
+            h = (videoH * r).roundToInt()
+        }
+        val lp = surface.layoutParams as? FrameLayout.LayoutParams
+        if (lp != null && lp.width == w && lp.height == h && lp.gravity == Gravity.CENTER) return
+        surface.layoutParams = (lp ?: FrameLayout.LayoutParams(w, h)).apply {
+            width = w
+            height = h
+            gravity = Gravity.CENTER
+        }
     }
 
     private fun updatePlayPauseIcon() {
@@ -1905,7 +1974,6 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         newPlayer.addListener(playerListener)
         playerView.player = newPlayer
-        playerView.resizeMode = RESIZE_MODES[resizeModeIndex]
         player = newPlayer
 
         val items = buildMediaItems()
@@ -2079,6 +2147,9 @@ class InternalPlayerActivity : AppCompatActivity() {
     }
 
     private val playerListener = object : Player.Listener {
+
+        // Новый ролик или серия, смена качества в потоке — рамка видео под новый кадр
+        override fun onVideoSizeChanged(videoSize: VideoSize) = applyVideoScale()
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             progressBar.visibility =

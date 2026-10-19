@@ -30,7 +30,6 @@ object HudStyle {
     private const val RING_DP = 3f
     private const val TRACK_COLOR = 0xFF3A3A4A.toInt()  // #seek-slider
     private const val THUMB_COLOR = 0xFFE7E4E4.toInt()  // ::-webkit-slider-thumb
-    private const val THUMB_DP = 14f
 
     /** «#ff8c00» (или «#f80») из веба; всё, что не разобрать, — цвет по умолчанию. */
     fun parseColor(raw: String?): Int {
@@ -98,7 +97,7 @@ object HudStyle {
     }
 
     fun seekThumb(context: Context): Drawable = oval(THUMB_COLOR).apply {
-        val size = context.dp(THUMB_DP)
+        val size = HudScale.seekThumbPx(context)
         setSize(size, size)
     }
 
