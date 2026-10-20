@@ -122,6 +122,9 @@ class App : MultiDexApplication() {
         // Процессы-заглушки рендерера WebView (:sandboxed_process*, их заводит библиотека
         // WebViewUpgrade) и :restart — служебные: ни проверки обновлений, ни TMDB им не нужны
         if (!ProcessUtils.isMainProcess(this)) return
+        // Приложение всегда в тёмной теме. Ставим до первой активности: из её onCreate
+        // AppCompat применял бы режим пересозданием (чёрный кадр на старте)
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
         // Свой движок WebView — до первого WebView в процессе, иначе подменить уже нельзя
         WebViewEngine.applyOnStartup(this)
         // ensure resources are properly initialized

@@ -40,7 +40,6 @@ import androidx.activity.addCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -560,7 +559,9 @@ class MainActivity : BaseActivity(),
     }
 
     private fun setupActivity() {
-        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
+        // Ночная тема ставится в App.onCreate, а не здесь: из onCreate уже созданной
+        // активности AppCompat применял её пересозданием — дважды за каждый холодный
+        // старт, с чёрным кадром между заставкой и экраном загрузки и тремя поднятиями WebView
         coverDisplayCutout()
         @Suppress("DEPRECATION")
         if (VERSION.SDK_INT <= Build.VERSION_CODES.TIRAMISU)
