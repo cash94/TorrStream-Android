@@ -30,8 +30,21 @@
         app:tint="@null"
         tools:visibility="visible" />
 
+    <!-- WebView — под экраном загрузки. Пока страница грузится, он скрыт (invisible):
+         видимый с самого старта, он задерживал первый кадр окна на секунды. Когда
+         страница готова, его открывают под загрузчиком и убирают загрузчик только после
+         того, как WebView нарисовал кадр (MainActivity.dismissLoader). Раньше WebView лежал
+         сверху и показывался одновременно с уходом загрузчика — первый кадр ещё ни разу
+         не рисовавшегося WebView выходил чёрным. -->
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/welcome"
+        android:visibility="invisible" />
+
     <!-- Экран загрузки. Занимает всё окно и несёт собственный градиент, поэтому перекрывает
-         то, что под ним, и не зависит от порядка появления WebView. -->
+         WebView под собой, пока страница не готова (MainActivity.dismissLoader). -->
     <FrameLayout
         android:id="@+id/loaderView"
         android:layout_width="match_parent"
@@ -84,12 +97,5 @@
                 android:textSize="38sp" />
         </LinearLayout>
     </FrameLayout>
-
-    <WebView
-        android:id="@+id/webView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@drawable/welcome"
-        android:visibility="gone" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

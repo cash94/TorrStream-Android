@@ -120,9 +120,11 @@ import my.torrstream.app.sched.Scheduler
 import java.util.Locale
 import java.util.regex.Pattern
 import androidx.core.content.edit
-import androidx.core.view.isGone
 import androidx.core.net.toUri
 import androidx.tvprovider.media.tv.TvContractCompat
+import android.webkit.WebView
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 
 
 class MainActivity : BaseActivity(),
@@ -140,6 +142,8 @@ class MainActivity : BaseActivity(),
     private var engineImportStarted = false
     private var isMenuVisible = false
     private lateinit var loaderView: View
+    // Страница загрузилась, экран загрузки уходит (dismissLoader)
+    private var loaderDismissed = false
     private lateinit var resultLauncher: ActivityResultLauncher<Intent>
     private lateinit var speechLauncher: ActivityResultLauncher<Intent>
     private lateinit var micPermissionLauncher: ActivityResultLauncher<String>
@@ -176,6 +180,10 @@ class MainActivity : BaseActivity(),
         private const val RESULT_VIMU_ERROR = 4
         private const val JS_SUCCESS = "SUCCESS"
         private const val JS_FAILURE = "FAILED"
+        // Затухание экрана загрузки поверх готовой страницы
+        private const val LOADER_FADE_MS = 250L
+        // Если WebView так и не отчитался о кадре — убираем загрузчик всё равно
+        private const val LOADER_DISMISS_TIMEOUT_MS = 1000L
         private const val IP4_DIG = "([01]?\\d?\\d|2[0-4]\\d|25[0-5])"
         private const val IP4_REGEX = "(${IP4_DIG}\\.){3}${IP4_DIG}"
         private const val IP6_DIG = "[0-9A-Fa-f]{1,4}"
@@ -439,6 +447,41 @@ class MainActivity : BaseActivity(),
      * открываем приложение. Ошибка переноса приложение не задерживает: оно откроется с тем,
      * что есть в папке нового движка.
      */
+    /**
+     * Убрать экран загрузки, когда под ним уже нарисована страница.
+     *
+     * WebView лежит под загрузчиком (activity_webview.xml) и только что стал видимым
+     * (onBrowserPageFinished), но его первый кадр ещё не готов. Поэтому ждём
+     * VisualStateCallback — он приходит, когда текущее состояние страницы попадёт в
+     * следующий кадр, — и только тогда гасим загрузчик. Гасим не рывком, а за
+     * LOADER_FADE_MS: веб-загрузчик под ним — та же картинка, и затухание прячет
+     * разницу в фазе вращения кольца и «дыхания» знака.
+     *
+     * Флаг ставится сразу: по нему runVoidJsFunc решает, что страница готова, — как
+     * раньше по loaderView.isGone, который выставлялся здесь же синхронно.
+     */
+    private fun dismissLoader(webView: View) {
+        if (loaderDismissed) return
+        loaderDismissed = true
+        var started = false
+        val fade = Runnable {
+            if (started) return@Runnable
+            started = true
+            loaderView.animate().alpha(0f).setDuration(LOADER_FADE_MS).withEndAction {
+                loaderView.visibility = View.GONE
+                loaderView.alpha = 1f
+                findViewById<View>(R.id.loaderMark)?.clearAnimation()
+            }.start()
+        }
+        if (webView is WebView && WebViewFeature.isFeatureSupported(WebViewFeature.VISUAL_STATE_CALLBACK)) {
+            WebViewCompat.postVisualStateCallback(webView, 0L) { fade.run() }
+            // Страховка: колбэк не приходит, если WebView так и не нарисовал кадр
+            loaderView.postDelayed(fade, LOADER_DISMISS_TIMEOUT_MS)
+        } else {
+            loaderView.post(fade)
+        }
+    }
+
     private fun continueEngineImport() {
         val origin = engineImportOrigin ?: return
         if (engineImportStarted) return
@@ -469,8 +512,7 @@ class MainActivity : BaseActivity(),
         // Страница открылась — выбранный движок WebView рабочий
         WebViewEngine.markHealthy(this)
         // Switch Loader (Note it control delayedVoidJsFunc)
-        loaderView.visibility = View.GONE
-        findViewById<View>(R.id.loaderMark)?.clearAnimation()
+        dismissLoader(view)
 
         Log.d(TAG, "LAMPA onLoadFinished $url")
 
@@ -2437,7 +2479,7 @@ class MainActivity : BaseActivity(),
     }
 
     fun runVoidJsFunc(funcName: String, params: String) {
-        if (browserInitComplete && loaderView.isGone) {
+        if (browserInitComplete && loaderDismissed) {
             logDebug("runVoidJsFunc $funcName")
             val js = ("(function(){"
                     + "try {"
