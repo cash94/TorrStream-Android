@@ -6,13 +6,20 @@ import android.webkit.WebResourceResponse
 import my.torrstream.app.App
 import my.torrstream.app.BuildConfig
 import my.torrstream.app.net.HttpHelper
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.ByteArrayInputStream
+import okhttp3.Response
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * Дисковый кэш картинок TMDB для WebView — то, что делает HTTP-кэш браузера на ПК.
@@ -26,6 +33,13 @@ import java.io.InputStream
  * Вытеснение — LRU: при переполнении ([MAX_ENTRIES] файлов или [MAX_BYTES]) удаляются
  * картинки, которые дольше всех не показывались. Порядок переживает перезапуск — это mtime
  * файла, его обновляем при каждом попадании.
+ *
+ * Промах WebView грузит сам, а кэш докачивает ту же картинку в фоне ([prefetch]). Раньше
+ * промах отдавался потоком, который качал картинку прямо при чтении, — на потоке WebView.
+ * Таких потоков мало, и пока они висели на медленном или молчащем зеркале (до 15 с на
+ * картинку), ждали все запросы страницы, включая API: после нескольких минут простоя
+ * соединения в пуле OkHttp оказывались мёртвыми, и каталог переставал грузить постеры, а
+ * карточка — детали. Цена фона — второй запрос картинки, один раз, пока её нет на диске.
  */
 object ImageCache {
     private const val TAG = "ImageCache"
@@ -53,15 +67,38 @@ object ImageCache {
     private var loaded = false
     private val lock = Any()
 
+    /** Таймаут фоновой докачки: соединение — половина, чтение и весь запрос — целиком. */
+    private const val PREFETCH_TIMEOUT_MS = 10_000
+    /** Сколько картинок докачивается одновременно и сколько из них — с одного зеркала. */
+    private const val PREFETCH_PARALLEL = 4
+    private const val PREFETCH_PER_HOST = 2
+    /** Больше ждущих — новые промахи не докачиваем: при быстром листании очередь устаревает. */
+    private const val PREFETCH_MAX_PENDING = 64
+
+    /** Имена картинок, которые сейчас докачиваются или ждут очереди. */
+    // newSetFromMap, а не ConcurrentHashMap.newKeySet: тот появился только в API 24, minSdk — 23
+    private val pending: MutableSet<String> = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
     private val client: OkHttpClient by lazy {
         // Тот же разрешительный TLS, что у остального приложения: WebView ошибки
         // сертификатов зеркал игнорирует (SysView.onReceivedSslError), кэш не должен быть строже
-        HttpHelper.getOkHttpClient(HttpHelper.DEFAULT_CONNECTION_TIMEOUT)
+        HttpHelper.getOkHttpClient(PREFETCH_TIMEOUT_MS).newBuilder()
+            // Простоявшее несколько минут соединение роутер может молча закрыть, и запрос по
+            // нему висит до таймаута. По умолчанию OkHttp держит соединения 5 минут — дольше,
+            // чем живут многие домашние NAT. 30 с хватает, чтобы переиспользовать соединение
+            // при листании, и мёртвые в пуле не задерживаются.
+            .connectionPool(ConnectionPool(PREFETCH_PARALLEL, 30, TimeUnit.SECONDS))
+            .dispatcher(Dispatcher().apply {
+                maxRequests = PREFETCH_PARALLEL
+                maxRequestsPerHost = PREFETCH_PER_HOST
+            })
+            .build()
     }
 
     /**
-     * Ответ для WebView или null, если запрос не наш (тогда WebView грузит сам).
-     * Зовётся из shouldInterceptRequest — на фоновом потоке.
+     * Ответ для WebView или null, если запрос не наш или картинки нет на диске (тогда WebView
+     * грузит сам). Зовётся из shouldInterceptRequest — на фоновом потоке WebView, и сети здесь
+     * нет ни в каком виде: только чтение файла с диска.
      */
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
         if (request.method != "GET" || request.isForMainFrame) return null
@@ -73,11 +110,11 @@ object ImageCache {
         return try {
             ensureLoaded()
             val cached = openCached(name)
-            // Промах: сеть — уже при чтении ответа, на потоке, который читает поток. Здесь
-            // блокироваться нельзя: потоков у shouldInterceptRequest мало, и одна медленная
-            // картинка задержала бы все остальные запросы страницы.
-            val data = cached ?: LazyStream { download(url, name, headers) }
-            WebResourceResponse(mimeOf(name), null, 200, "OK", HEADERS, data)
+            if (cached == null) {
+                prefetch(url, name, headers)
+                return null
+            }
+            WebResourceResponse(mimeOf(name), null, 200, "OK", HEADERS, cached)
         } catch (e: Exception) {
             Log.w(TAG, "intercept $url", e)
             null
@@ -134,23 +171,49 @@ object ImageCache {
         }
     }
 
-    private fun download(url: String, name: String, headers: Map<String, String>): InputStream {
-        val builder = Request.Builder().url(url)
-        // Заголовки WebView (User-Agent, Referer, Accept) — зеркало должно видеть тот же запрос
-        // Accept-Encoding не копируем: с ним OkHttp перестаёт сам распаковывать gzip
-        headers.filterKeys { !it.equals("Accept-Encoding", ignoreCase = true) }
-            .forEach { (k, v) -> builder.header(k, v) }
-        client.newCall(builder.build()).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code()}")
-            val body = resp.body() ?: throw IOException("Пустой ответ")
-            val type = body.contentType()
-            // Зеркало, отдающее страницу ошибки с кодом 200, не должно попасть в кэш навсегда
-            if (type != null && type.type() != "image") throw IOException("Не картинка: $type")
-            val bytes = body.bytes()
-            if (bytes.isEmpty()) throw IOException("Пустой ответ")
-            if (bytes.size <= MAX_IMAGE_BYTES) store(name, bytes)
-            return ByteArrayInputStream(bytes)
+    /**
+     * Докачивает картинку на диск асинхронно, в потоках OkHttp — ни поток WebView, ни
+     * загрузку самой страницы это не задерживает. Сбой ничего не ломает: картинку уже
+     * грузит WebView, в кэш она попадёт при следующем промахе.
+     */
+    private fun prefetch(url: String, name: String, headers: Map<String, String>) {
+        if (pending.size >= PREFETCH_MAX_PENDING || !pending.add(name)) return
+        val request = try {
+            val builder = Request.Builder().url(url)
+            // Заголовки WebView (User-Agent, Referer, Accept) — зеркало должно видеть тот же запрос
+            // Accept-Encoding не копируем: с ним OkHttp перестаёт сам распаковывать gzip
+            headers.filterKeys { !it.equals("Accept-Encoding", ignoreCase = true) }
+                .forEach { (k, v) -> builder.header(k, v) }
+            builder.build()
+        } catch (e: Exception) {
+            pending.remove(name)
+            return
         }
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                pending.remove(name)
+                if (BuildConfig.DEBUG) Log.d(TAG, "Не докачана $url: $e")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    response.use { resp ->
+                        if (!resp.isSuccessful) return
+                        val body = resp.body() ?: return
+                        val type = body.contentType()
+                        // Зеркало, отдающее страницу ошибки с кодом 200, не должно попасть в кэш навсегда
+                        if (type != null && type.type() != "image") return
+                        if (body.contentLength() > MAX_IMAGE_BYTES) return
+                        val bytes = body.bytes()
+                        if (bytes.isNotEmpty() && bytes.size <= MAX_IMAGE_BYTES) store(name, bytes)
+                    }
+                } catch (e: IOException) {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Не докачана $url: $e")
+                } finally {
+                    pending.remove(name)
+                }
+            }
+        })
     }
 
     private fun store(name: String, bytes: ByteArray) {
@@ -206,22 +269,6 @@ object ImageCache {
             File(dir, eldest.key).delete()
             totalBytes -= eldest.value
             it.remove()
-        }
-    }
-
-    /**
-     * Поток, который открывает источник при первом чтении. Ошибка сети отсюда — это ошибка
-     * загрузки картинки для страницы: у <img> срабатывает onerror, и каталог идёт на
-     * следующее зеркало, как и без кэша.
-     */
-    private class LazyStream(private val open: () -> InputStream) : InputStream() {
-        private var source: InputStream? = null
-        private fun src() = source ?: open().also { source = it }
-        override fun read(): Int = src().read()
-        override fun read(b: ByteArray, off: Int, len: Int): Int = src().read(b, off, len)
-        override fun available(): Int = source?.available() ?: 0
-        override fun close() {
-            source?.close()
         }
     }
 }
