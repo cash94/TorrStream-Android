@@ -9,7 +9,7 @@ plugins {
 android {
     namespace 'com.norman.webviewup.lib'
     //noinspection GradleDependency
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         minSdkVersion 21
