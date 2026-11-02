@@ -1,0 +1,14 @@
+// Отдельный проект только для сборки FFmpeg-расширения (см. ../build.sh)
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = 'project'

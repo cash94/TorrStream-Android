@@ -1,6 +1,8 @@
 # Built application files
 *.apk
 *.aar
+# Своя сборка FFmpeg-расширения Media3 (tools/ffmpeg-decoder/build.sh) — в репозитории
+!app/libs/lib-decoder-ffmpeg-*.aar
 *.ap_
 *.aab
 

@@ -163,8 +163,8 @@ object AudioOutput {
             8 to listOf(l, r, c, lfe, sl, sr, sl, sr),
         )
         return ChannelMixingAudioProcessor().apply {
-            putChannelMixingMatrix(ChannelMixingMatrix.create(1, 2))
-            putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2))
+            putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(1, 2))
+            putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(2, 2))
             layouts.forEach { (count, rows) ->
                 val peak = maxOf(rows.sumOf { it[0].toDouble() }, rows.sumOf { it[1].toDouble() }).toFloat()
                 val coefficients = rows.flatMap { row -> row.map { it / peak } }.toFloatArray()
