@@ -31,6 +31,7 @@ object Prefs {
     private const val PLAYER_DECODER_KEY = "player_decoder"
     private const val PLAYER_ENGINE_KEY = "player_engine"
     private const val PLAYER_AUDIO_KEY = "player_audio"
+    private const val PLAYER_SUBTITLE_SIZE_KEY = "player_subtitle_size"
     private const val BACK_HOLD_EXIT_KEY = "back_hold_exit"
 
     /** Hardware first, software picked up whenever hardware cannot handle the track. */
@@ -55,6 +56,13 @@ object Prefs {
     const val AUDIO_AUTO = 1
     /** Битстрим AC3/E-AC3/DTS всегда, даже если устройство о поддержке не сообщает. */
     const val AUDIO_PASSTHROUGH = 2
+
+    /**
+     * Размер субтитров встроенного плеера — те же пять уровней, что у веб-плеера
+     * (player.js: SUBTITLE_SIZES): множитель к обычному размеру движка.
+     */
+    val PLAYER_SUBTITLE_SCALES = floatArrayOf(0.7f, 0.85f, 1f, 1.3f, 1.6f)
+    const val PLAYER_SUBTITLE_SIZE_DEFAULT = 2
 
     /** Buffer sizes offered in the built-in player's settings, in megabytes. */
     val PLAYER_BUFFER_OPTIONS = intArrayOf(30, 50, 80, 120, 160, 200)
@@ -130,6 +138,12 @@ object Prefs {
     var Context.playerAudioMode: Int
         get() = appPrefs.getInt(PLAYER_AUDIO_KEY, AUDIO_PCM)
         set(value) = appPrefs.edit { putInt(PLAYER_AUDIO_KEY, value) }
+
+    /** Встроенный плеер: уровень размера субтитров — индекс в PLAYER_SUBTITLE_SCALES. */
+    var Context.playerSubtitleSize: Int
+        get() = appPrefs.getInt(PLAYER_SUBTITLE_SIZE_KEY, PLAYER_SUBTITLE_SIZE_DEFAULT)
+            .takeIf { it in PLAYER_SUBTITLE_SCALES.indices } ?: PLAYER_SUBTITLE_SIZE_DEFAULT
+        set(value) = appPrefs.edit { putInt(PLAYER_SUBTITLE_SIZE_KEY, value) }
 
     /** Built-in player: how much of the stream ExoPlayer keeps buffered, in megabytes. */
     var Context.playerBufferMb: Int

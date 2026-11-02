@@ -76,6 +76,15 @@
     <string name="player_engine_vlc_desc">Its own FFmpeg decoders for any format</string>
     <string name="player_audio">Audio output</string>
     <string name="player_audio_desc">How to output multichannel audio (AC3, E-AC3, DTS)</string>
+    <string name="player_subtitle_size">Subtitle size</string>
+    <string name="player_subtitle_size_desc">How large subtitles are on screen</string>
+    <string-array name="player_subtitle_sizes">
+        <item>Very small</item>
+        <item>Small</item>
+        <item>Normal</item>
+        <item>Large</item>
+        <item>Very large</item>
+    </string-array>
     <string name="player_audio_pcm">Decode to PCM</string>
     <string name="player_audio_pcm_desc">Compatible: the device decodes the audio itself. Pick this if there is no sound with a soundbar or receiver</string>
     <string name="player_audio_auto">Auto</string>

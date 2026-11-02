@@ -29,6 +29,7 @@ import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.interfaces.IMedia
 import org.videolan.libvlc.interfaces.IVLCVout
+import kotlin.math.roundToInt
 
 /**
  * libVLC под интерфейсом Media3 [Player] — запасной движок встроенного плеера.
@@ -53,6 +54,8 @@ class VlcPlayer(
     private val cachingMs: Int = DEFAULT_CACHING_MS,
     /** Вывод звука — одна из констант Prefs.AUDIO_*, см. [AudioOutput]. */
     audioMode: Int = Prefs.AUDIO_PCM,
+    /** Размер субтитров — множитель к обычному (Prefs.PLAYER_SUBTITLE_SCALES). */
+    subtitleScale: Float = 1f,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
 
     /**
@@ -69,7 +72,11 @@ class VlcPlayer(
 
     private val libVlc = LibVLC(
         context.applicationContext,
-        if (passthrough) LIBVLC_OPTIONS_PASSTHROUGH else LIBVLC_OPTIONS,
+        ArrayList(
+            (if (passthrough) LIBVLC_OPTIONS_PASSTHROUGH else LIBVLC_OPTIONS) +
+                    // Масштаб текста субтитров в процентах (libVLC 3: 10–500, обычный — 100)
+                    "--sub-text-scale=${(subtitleScale * 100).roundToInt()}"
+        ),
     )
     private val mediaPlayer = MediaPlayer(libVlc).apply {
         if (passthrough) {

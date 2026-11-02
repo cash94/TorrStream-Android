@@ -422,7 +422,7 @@
          the control bar, and starts off-screen (translationX is applied in code once measured). -->
     <LinearLayout
         android:id="@+id/sidePanel"
-        android:layout_width="380dp"
+        android:layout_width="@dimen/side_panel_width"
         android:layout_height="match_parent"
         android:layout_gravity="end"
         android:background="#B30D0D12"
@@ -438,7 +438,7 @@
             android:paddingEnd="20dp"
             android:paddingBottom="12dp"
             android:textColor="#4A9EFF"
-            android:textSize="20sp"
+            android:textSize="@dimen/side_panel_title_text"
             android:textStyle="bold" />
 
         <ListView

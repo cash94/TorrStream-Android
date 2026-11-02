@@ -140,6 +140,28 @@ object HudScale {
         root.findViewById<View>(R.id.exitAlert)?.updateLayoutParams<ViewGroup.MarginLayoutParams> {
             bottomMargin = m.vw(6f)
         }
+
+        // Боковая панель: 40vw, заголовок 2.5vw (24px на 960). Строки — sideRow, их
+        // создаёт адаптер уже после apply
+        root.findViewById<View>(R.id.sidePanel)?.updateLayoutParams<ViewGroup.LayoutParams> {
+            width = m.vw(40f)
+        }
+        root.findViewById<TextView>(R.id.sidePanelTitle)?.let {
+            it.px(m.vwF(2.5f))
+            it.updatePadding(left = m.vw(2.1f), right = m.vw(2.1f))
+        }
+    }
+
+    /**
+     * Строка боковой панели на широком экране: текст 2.2vw (21px на 960), высота от 6.7vw,
+     * поля 2.1vw по бокам — values-w900dp, пересчитанные от ширины, как и остальной ХУД.
+     */
+    fun sideRow(row: TextView) {
+        val m = Metrics(row.context)
+        if (!m.wide) return
+        row.px(m.vwF(2.2f))
+        row.minHeight = m.vw(6.7f)
+        row.setPadding(m.vw(2.1f), m.vw(1.05f), m.vw(2.1f), m.vw(1.05f))
     }
 
     /** Текст в пикселях, как в вебе: системный масштаб шрифта веб-плеер тоже не трогает. */

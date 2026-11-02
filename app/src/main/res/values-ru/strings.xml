@@ -74,6 +74,15 @@
     <string name="player_engine_vlc_desc">Свои декодеры FFmpeg для любых форматов</string>
     <string name="player_audio">Вывод звука</string>
     <string name="player_audio_desc">Как выводить многоканальный звук (AC3, E-AC3, DTS)</string>
+    <string name="player_subtitle_size">Размер субтитров</string>
+    <string name="player_subtitle_size_desc">Насколько крупно субтитры на экране</string>
+    <string-array name="player_subtitle_sizes">
+        <item>Очень мелкие</item>
+        <item>Мелкие</item>
+        <item>Обычные</item>
+        <item>Крупные</item>
+        <item>Очень крупные</item>
+    </string-array>
     <string name="player_audio_pcm">Декодировать в PCM</string>
     <string name="player_audio_pcm_desc">Совместимость: звук декодирует само устройство. Выберите, если с саундбаром или ресивером нет звука</string>
     <string name="player_audio_auto">Авто</string>

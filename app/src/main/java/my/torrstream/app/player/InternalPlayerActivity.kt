@@ -78,6 +78,7 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import my.torrstream.app.App
 import my.torrstream.app.R
 import my.torrstream.app.helpers.Prefs
@@ -86,6 +87,7 @@ import my.torrstream.app.helpers.Prefs.playerBufferMb
 import my.torrstream.app.helpers.Prefs.playerDecoderMode
 import my.torrstream.app.helpers.Prefs.playerEngine
 import my.torrstream.app.helpers.Prefs.playerShowClock
+import my.torrstream.app.helpers.Prefs.playerSubtitleSize
 import java.util.Date
 import java.util.Locale
 import kotlin.math.max
@@ -141,6 +143,11 @@ class InternalPlayerActivity : AppCompatActivity() {
         private val HASH_RE = Regex("^[0-9a-fA-F]{40}$")
         private const val SCREEN_SAVER_DELAY_MS = 15_000L
         private const val SCREEN_SAVER_DIM = 0.75f
+        /**
+         * Пауза с репликой субтитров на экране — её, скорее всего, читают: затемнение
+         * откладывается на столько (всего минута, как заставка веб-плеера на паузе).
+         */
+        private const val SCREEN_SAVER_SUBS_EXTRA_MS = 45_000L
         private const val NEW_LINE = "\n"
 
         /**
@@ -593,6 +600,12 @@ class InternalPlayerActivity : AppCompatActivity() {
      */
     private val enterScreenSaver = Runnable {
         if (player?.isPlaying == true) return@Runnable
+        // Пелена гасила и реплику, ради которой поставили паузу (так было и в веб-плеере)
+        if (!screenSaverDeferred && player?.currentCues?.cues?.isNotEmpty() == true) {
+            screenSaverDeferred = true
+            handler.postDelayed(enterScreenSaverRef, SCREEN_SAVER_SUBS_EXTRA_MS)
+            return@Runnable
+        }
         screenSaverOn = true
         setControlsVisible(false)
         hideSidePanel()
@@ -601,8 +614,12 @@ class InternalPlayerActivity : AppCompatActivity() {
         dimOverlay.animate().alpha(SCREEN_SAVER_DIM).setDuration(600).start()
     }
 
+    private val enterScreenSaverRef: Runnable get() = enterScreenSaver
+    private var screenSaverDeferred = false
+
     private fun scheduleScreenSaver(isPlaying: Boolean) {
         handler.removeCallbacks(enterScreenSaver)
+        screenSaverDeferred = false
         if (!isPlaying) handler.postDelayed(enterScreenSaver, SCREEN_SAVER_DELAY_MS)
     }
 
@@ -722,6 +739,11 @@ class InternalPlayerActivity : AppCompatActivity() {
                 R.string.player_clock_desc,
             ),
             withDescription(
+                "${getString(R.string.player_subtitle_size)}: " +
+                        subtitleSizeLabel(playerSubtitleSize),
+                R.string.player_subtitle_size_desc,
+            ),
+            withDescription(
                 "${getString(R.string.player_buffer)}: " +
                         getString(R.string.player_buffer_mb, playerBufferMb),
                 R.string.player_buffer_desc,
@@ -749,6 +771,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 // Reopen so the row shows the value it now holds.
                 showSettingsPanel()
             },
+            { showSubtitleSizePanel() },
             { showBufferPanel() },
             { showDecoderPanel() },
             { showEnginePanel() },
@@ -762,6 +785,44 @@ class InternalPlayerActivity : AppCompatActivity() {
             opener = btnSettings,
             itemLayout = R.layout.item_side_panel_desc,
         )
+    }
+
+    private fun subtitleSizeLabel(level: Int): String =
+        resources.getStringArray(R.array.player_subtitle_sizes)[level]
+
+    private fun showSubtitleSizePanel() {
+        val levels = Prefs.PLAYER_SUBTITLE_SCALES.indices.toList()
+        showSidePanel(
+            titleRes = R.string.player_subtitle_size,
+            labels = levels.map { subtitleSizeLabel(it) },
+            checkedIndex = playerSubtitleSize,
+            actions = levels.map { level -> { applySubtitleSizeSetting(level) } },
+            opener = btnSettings,
+            back = { showSettingsPanel() },
+        )
+    }
+
+    /**
+     * ExoPlayer рисует субтитры SubtitleView — меняем на ходу. libVLC берёт масштаб текста
+     * только при создании (--sub-text-scale), поэтому его пересобираем с той же позиции.
+     */
+    private fun applySubtitleSizeSetting(level: Int) {
+        if (level == playerSubtitleSize) return
+        playerSubtitleSize = level
+        if (usingVlc) restartPlayer("subtitle size $level") else applySubtitleSize()
+    }
+
+    /**
+     * Размер текста ExoPlayer: доля высоты кадра по умолчанию × множитель уровня. Размеры,
+     * зашитые в сами субтитры (стили ASS/SSA), при «Обычном» остаются, иначе — наш размер,
+     * а то настройка на таких файлах ничего бы не меняла.
+     */
+    private fun applySubtitleSize() {
+        val scale = Prefs.PLAYER_SUBTITLE_SCALES[playerSubtitleSize]
+        playerView.subtitleView?.apply {
+            setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale)
+            setApplyEmbeddedFontSizes(scale == 1f)
+        }
     }
 
     private fun showBufferPanel() {
@@ -792,7 +853,8 @@ class InternalPlayerActivity : AppCompatActivity() {
             .append(description)
         val from = title.length + 1
         builder.setSpan(
-            RelativeSizeSpan(0.75f), from, builder.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            // 0.88 — подпись к названию в панелях веб-плеера (18.5px к 21px)
+            RelativeSizeSpan(0.88f), from, builder.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
         )
         builder.setSpan(
             ForegroundColorSpan(0xB3FFFFFF.toInt()), from, builder.length,
@@ -1079,7 +1141,10 @@ class InternalPlayerActivity : AppCompatActivity() {
                 super.getView(position, convertView, parent).also { row ->
                     if (convertView == null) {
                         row.background = HudStyle.listItem(focusColor)
-                        (row as? TextView)?.setTextColor(textColors)
+                        (row as? TextView)?.let {
+                            it.setTextColor(textColors)
+                            HudScale.sideRow(it)
+                        }
                     }
                 }
         }
@@ -1225,6 +1290,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         fadeHud(controlsPanel, visible)
         fadeHud(headerView, visible)
         fadeHud(playerHint, visible)
+        raiseSubtitles(visible)
         clockView.animate().alpha(if (visible) CLOCK_ALPHA_HUD else CLOCK_ALPHA_IDLE)
             .setDuration(HUD_FADE_MS).start()
         // Статистику TorrServer опрашиваем, только пока её видно
@@ -1251,6 +1317,21 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private val controlsVisible: Boolean
         get() = hudShown
+
+    /**
+     * Реплики ExoPlayer — над панелью управления, пока она видна, как в веб-плеере (класс
+     * cues-raised): иначе крупные субтитры ложились под кнопки и полосу перемотки. libVLC
+     * рисует их в самом кадре — там не сдвинуть.
+     */
+    private fun raiseSubtitles(hudVisible: Boolean) {
+        val view = playerView.subtitleView ?: return
+        val panel = controlsPanel.height
+        val screen = playerView.height
+        view.setBottomPaddingFraction(
+            if (hudVisible && panel > 0 && screen > 0) panel.toFloat() / screen
+            else SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION
+        )
+    }
 
     /** Плавное появление и угасание, как у веб-плеера; когда угасание закончилось — GONE. */
     private fun fadeHud(view: View, visible: Boolean) {
@@ -2050,6 +2131,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         newPlayer.addListener(playerListener)
         playerView.player = newPlayer
         player = newPlayer
+        applySubtitleSize()
 
         val items = buildMediaItems()
         if (items.isEmpty()) {
@@ -2090,6 +2172,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         subtitleUrls = intent.getStringArrayExtra(Extras.SUBS)?.toList().orEmpty(),
         subtitleIndex = intent.getIntExtra(Extras.PLAYLIST_INDEX, 0),
         audioMode = audioMode,
+        subtitleScale = Prefs.PLAYER_SUBTITLE_SCALES[playerSubtitleSize],
     )
 
     private fun buildExoPlayer(headers: Map<String, String>): Player {

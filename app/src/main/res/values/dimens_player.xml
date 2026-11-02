@@ -40,4 +40,15 @@
     <dimen name="hud_alert_text">13sp</dimen>
     <dimen name="hud_alert_pad_h">14dp</dimen>
     <dimen name="hud_alert_pad_v">6dp</dimen>
+
+    <!-- Боковые панели (серии, аудио и субтитры, настройки). Телевизор — values-w900dp, там
+         как в веб-плеере на 960×540 (тир «панели плеера на 960x540», styles.css): заголовок
+         24, строка 21, высота строки под значок 41.5 + отступы. На телефоне чуть меньше —
+         иначе в альбомной ориентации влезало бы три строки. -->
+    <dimen name="side_panel_width">380dp</dimen>
+    <dimen name="side_panel_title_text">22sp</dimen>
+    <dimen name="side_panel_item_text">19sp</dimen>
+    <dimen name="side_panel_item_min_height">58dp</dimen>
+    <dimen name="side_panel_item_pad_v">9dp</dimen>
+    <dimen name="side_panel_check">24dp</dimen>
 </resources>
