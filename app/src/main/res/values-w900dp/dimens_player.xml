@@ -29,9 +29,9 @@
 
     <!-- Боковые панели: 40vw веба на экране 960dp -->
     <dimen name="side_panel_width">384dp</dimen>
-    <dimen name="side_panel_title_text">24sp</dimen>
-    <dimen name="side_panel_item_text">21sp</dimen>
-    <dimen name="side_panel_item_min_height">64dp</dimen>
-    <dimen name="side_panel_item_pad_v">10dp</dimen>
-    <dimen name="side_panel_check">26dp</dimen>
+    <dimen name="side_panel_title_text">19.5sp</dimen>
+    <dimen name="side_panel_item_text">17sp</dimen>
+    <dimen name="side_panel_item_min_height">52dp</dimen>
+    <dimen name="side_panel_item_pad_v">8dp</dimen>
+    <dimen name="side_panel_check">21dp</dimen>
 </resources>

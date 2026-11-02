@@ -1,6 +1,7 @@
 package my.torrstream.app.player
 
 import android.app.Activity
+import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.content.Context
@@ -77,6 +78,7 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
 import my.torrstream.app.App
@@ -143,6 +145,10 @@ class InternalPlayerActivity : AppCompatActivity() {
         private val HASH_RE = Regex("^[0-9a-fA-F]{40}$")
         private const val SCREEN_SAVER_DELAY_MS = 15_000L
         private const val SCREEN_SAVER_DIM = 0.75f
+        private val SUBTITLE_STYLE = CaptionStyleCompat(
+            Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT,
+            CaptionStyleCompat.EDGE_TYPE_OUTLINE, Color.BLACK, null,
+        )
         /**
          * Пауза с репликой субтитров на экране — её, скорее всего, читают: затемнение
          * откладывается на столько (всего минута, как заставка веб-плеера на паузе).
@@ -822,6 +828,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         playerView.subtitleView?.apply {
             setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale)
             setApplyEmbeddedFontSizes(scale == 1f)
+            // Без плашки: белый текст с чёрной обводкой поверх кадра, как в веб-плеере
+            setStyle(SUBTITLE_STYLE)
         }
     }
 
