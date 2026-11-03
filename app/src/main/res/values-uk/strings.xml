@@ -199,4 +199,15 @@
     <string name="image_cache_empty">Кеш постерів порожній</string>
     <string name="webview_engine_migrating">Переношу налаштування в новий рушій…</string>
     <string name="webview_engine_migrate_failed">Не вдалося перенести налаштування в новий рушій: %s</string>
+    <string name="back_key_menu">Кнопка «Назад» на пульті</string>
+    <string name="back_key_title">Кнопка «Назад» на пульті</string>
+    <string name="back_key_prompt">Натисніть кнопку пульта, яка має працювати як «Назад» (наприклад, RETURN).</string>
+    <string name="back_key_current">Зараз призначена: %1$s</string>
+    <string name="back_key_none">Додаткову кнопку не призначено.</string>
+    <string name="back_key_done">Готово</string>
+    <string name="back_key_reset">Скинути</string>
+    <string name="back_key_cleared">Додаткову кнопку «Назад» скинуто</string>
+    <string name="back_key_reserved">%1$s зайнята іншою дією. Натисніть іншу кнопку.</string>
+    <string name="back_key_already">%1$s вже працює як «Назад».</string>
+    <string name="back_key_saved">Запам\'ятовано: %1$s. Тепер ця кнопка працює як «Назад».</string>
 </resources>

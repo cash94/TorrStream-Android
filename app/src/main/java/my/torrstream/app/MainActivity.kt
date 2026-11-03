@@ -106,6 +106,7 @@ import my.torrstream.app.helpers.Prefs.lastPlayedPrefs
 import my.torrstream.app.helpers.Prefs.migrate
 import my.torrstream.app.helpers.Prefs.tvPlayer
 import my.torrstream.app.helpers.Prefs.urlHistory
+import my.torrstream.app.helpers.RemoteKeys
 import my.torrstream.app.helpers.getAppVersion
 import my.torrstream.app.helpers.coverDisplayCutout
 import my.torrstream.app.helpers.hideSystemUI
@@ -401,6 +402,15 @@ class MainActivity : BaseActivity(),
         }
         return super.onKeyDown(keyCode, event)
     }
+
+    /**
+     * Кнопка-псевдоним «Назад» (RemoteKeys: ESCAPE, «B» геймпада, назначенная в меню) — на входе
+     * переписывается в KEYCODE_BACK. Дальше работают обычные пути: onBackPressedDispatcher,
+     * удержание (onKeyLongPress). Без этого ESCAPE и нестандартные коды уходили в WebView,
+     * страница их не знает — RETURN на пультах Tanix, X96 и их клонов не делал ничего.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        super.dispatchKeyEvent(RemoteKeys.toBack(this, event) ?: event)
 
     // Удержание «Назад» — меню приложения или, если так выбрано в «Об устройстве», выход
     override fun onKeyLongPress(keyCode: Int, event: KeyEvent): Boolean {
@@ -1485,6 +1495,11 @@ class MainActivity : BaseActivity(),
                 icon = R.drawable.ic_player_settings
             ),
             MenuItem(
+                title = getString(R.string.back_key_menu),
+                action = "showBackKeyDialog",
+                icon = R.drawable.round_exit_to_app_24
+            ),
+            MenuItem(
                 title = getString(R.string.change_url_title),
                 action = "showUrlInputDialog",
                 icon = R.drawable.round_link_24
@@ -1527,6 +1542,8 @@ class MainActivity : BaseActivity(),
 
                     "clearImageCache" -> clearImageCache()
 
+                    "showBackKeyDialog" -> showBackKeyDialog()
+
                     "showUrlInputDialog" -> {
                         App.toast(R.string.change_note)
                         showUrlInputDialog()
@@ -1544,6 +1561,55 @@ class MainActivity : BaseActivity(),
         // Show full screen dialog
         showFullScreenDialog(dialog)
         isMenuVisible = true
+    }
+
+    /**
+     * «Кнопка „Назад“ на пульте»: ждём нажатия и запоминаем кнопку (RemoteKeys). Для пультов,
+     * у которых RETURN шлёт код, не похожий на «Назад». Код показываем — чтобы его можно было
+     * добавить в RemoteKeys.BACK_CODES для всех.
+     *
+     * Стрелки и ОК не перехватываем — ими выбирают кнопки окна; системная «Назад» закрывает окно.
+     */
+    private fun showBackKeyDialog() {
+        fun current(): String = RemoteKeys.describeCustom(this)
+            ?.let { getString(R.string.back_key_current, it) }
+            ?: getString(R.string.back_key_none)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.back_key_title)
+            .setMessage(getString(R.string.back_key_prompt) + "\n\n" + current())
+            .setPositiveButton(R.string.back_key_done, null)
+            .setNeutralButton(R.string.back_key_reset) { _, _ ->
+                RemoteKeys.clearCustom(this)
+                App.toast(R.string.back_key_cleared)
+            }
+            .create()
+        showFullScreenDialog(dialog)
+        dialog.setOnKeyListener { d, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0) return@setOnKeyListener false
+            if (keyCode == KeyEvent.KEYCODE_BACK) return@setOnKeyListener false
+            val alert = d as AlertDialog
+            val text = RemoteKeys.describe(event)
+            val message = when {
+                // Стрелки и ОК — навигация по окну; громкость — системе
+                RemoteKeys.isReserved(keyCode) -> when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+                    KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN,
+                    KeyEvent.KEYCODE_VOLUME_MUTE -> return@setOnKeyListener false
+                    else -> getString(R.string.back_key_reserved, text)
+                }
+
+                RemoteKeys.isBack(this, event) -> getString(R.string.back_key_already, text)
+
+                else -> {
+                    RemoteKeys.saveCustom(this, event)
+                    getString(R.string.back_key_saved, text)
+                }
+            }
+            alert.setMessage(getString(R.string.back_key_prompt) + "\n\n" + message)
+            true
+        }
     }
 
     /**
@@ -2172,6 +2238,12 @@ class MainActivity : BaseActivity(),
                 if (VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                     window?.addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
                 }
+            }
+            // Кнопка-псевдоним «Назад» закрывает окно, как системная (см. dispatchKeyEvent).
+            // Окно назначения кнопки ставит свой обработчик поверх этого.
+            setOnKeyListener { d, _, event ->
+                RemoteKeys.toBack(this@MainActivity, event)
+                    ?.let { (d as android.app.Dialog).dispatchKeyEvent(it) } ?: false
             }
             // Show the dialog
             show()

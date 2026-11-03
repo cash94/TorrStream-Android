@@ -46,6 +46,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import my.torrstream.app.helpers.RemoteKeys
 import my.torrstream.app.helpers.ServerCookies
 import my.torrstream.app.helpers.coverDisplayCutout
 import my.torrstream.app.helpers.hideSystemUI
@@ -1361,7 +1362,9 @@ class InternalPlayerActivity : AppCompatActivity() {
      * Remote navigation, as specified: the button row runs left to right, "up" from it lands on
      * the seek bar (where left/right scrub), "up" again hides the panel, and "down" returns.
      */
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    override fun dispatchKeyEvent(original: KeyEvent): Boolean {
+        // RETURN пультов Tanix/X96 (ESCAPE, «B» геймпада, назначенная кнопка) — как «Назад»
+        val event = RemoteKeys.toBack(this, original) ?: original
         if (event.action == KeyEvent.ACTION_DOWN) {
             // While dimmed, the first press only wakes: it should not also seek or open a panel.
             if (wakeFromScreenSaver()) return true
@@ -1371,7 +1374,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 if (event.keyCode == KeyEvent.KEYCODE_BACK ||
                     event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT
                 ) {
-                    sidePanelBack?.invoke() ?: hideSidePanel()
+                    if (event.repeatCount == 0) sidePanelBack?.invoke() ?: hideSidePanel()
                     return true
                 }
                 return super.dispatchKeyEvent(event)
@@ -1379,7 +1382,9 @@ class InternalPlayerActivity : AppCompatActivity() {
 
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BACK -> {
-                    onBackInPlayer()
+                    // Повтор от ИК-драйвера при коротком нажатии — не второе «Назад»: иначе
+                    // одно нажатие сразу закрывало бы плеер
+                    if (event.repeatCount == 0) onBackInPlayer()
                     return true
                 }
 

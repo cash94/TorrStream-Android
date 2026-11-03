@@ -199,4 +199,15 @@
     <string name="image_cache_empty">Кэш постеров пуст</string>
     <string name="webview_engine_migrating">Переношу настройки в новый движок…</string>
     <string name="webview_engine_migrate_failed">Не удалось перенести настройки в новый движок: %s</string>
+    <string name="back_key_menu">Кнопка «Назад» на пульте</string>
+    <string name="back_key_title">Кнопка «Назад» на пульте</string>
+    <string name="back_key_prompt">Нажмите кнопку пульта, которая должна работать как «Назад» (например, RETURN).</string>
+    <string name="back_key_current">Сейчас назначена: %1$s</string>
+    <string name="back_key_none">Дополнительная кнопка не назначена.</string>
+    <string name="back_key_done">Готово</string>
+    <string name="back_key_reset">Сбросить</string>
+    <string name="back_key_cleared">Дополнительная кнопка «Назад» сброшена</string>
+    <string name="back_key_reserved">%1$s занята другим действием. Нажмите другую кнопку.</string>
+    <string name="back_key_already">%1$s уже работает как «Назад».</string>
+    <string name="back_key_saved">Запомнено: %1$s. Теперь эта кнопка работает как «Назад».</string>
 </resources>

@@ -203,4 +203,15 @@
     <string name="image_cache_empty">Poster cache is empty</string>
     <string name="webview_engine_migrating">Moving settings to the new engine…</string>
     <string name="webview_engine_migrate_failed">Settings could not be moved to the new engine: %s</string>
+    <string name="back_key_menu">Remote “Back” button</string>
+    <string name="back_key_title">Remote “Back” button</string>
+    <string name="back_key_prompt">Press the remote button that should work as “Back” (for example, RETURN).</string>
+    <string name="back_key_current">Assigned now: %1$s</string>
+    <string name="back_key_none">No extra button assigned.</string>
+    <string name="back_key_done">Done</string>
+    <string name="back_key_reset">Reset</string>
+    <string name="back_key_cleared">Extra “Back” button removed</string>
+    <string name="back_key_reserved">%1$s is used for something else. Press another button.</string>
+    <string name="back_key_already">%1$s already works as “Back”.</string>
+    <string name="back_key_saved">Saved: %1$s. This button now works as “Back”.</string>
 </resources>

@@ -196,4 +196,15 @@
     <string name="image_cache_empty">海报缓存为空</string>
     <string name="webview_engine_migrating">正在将设置迁移到新内核…</string>
     <string name="webview_engine_migrate_failed">无法将设置迁移到新内核：%s</string>
+    <string name="back_key_menu">遥控器“返回”键</string>
+    <string name="back_key_title">遥控器“返回”键</string>
+    <string name="back_key_prompt">请按下应作为“返回”的遥控器按键（例如 RETURN）。</string>
+    <string name="back_key_current">当前已设置：%1$s</string>
+    <string name="back_key_none">未设置额外按键。</string>
+    <string name="back_key_done">完成</string>
+    <string name="back_key_reset">重置</string>
+    <string name="back_key_cleared">已移除额外的“返回”键</string>
+    <string name="back_key_reserved">%1$s 已用于其他操作，请按其他按键。</string>
+    <string name="back_key_already">%1$s 已经可以作为“返回”。</string>
+    <string name="back_key_saved">已保存：%1$s。此按键现在作为“返回”。</string>
 </resources>
