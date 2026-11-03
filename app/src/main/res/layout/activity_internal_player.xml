@@ -22,6 +22,14 @@
         app:resize_mode="fill"
         app:use_controller="false" />
 
+    <!-- «Онлайн субтитры»: реплики кладёт InternalPlayerActivity (showOnlineText) по позиции
+         плеера, поверх кадра — и при libVLC, который свои субтитры рисует в самом кадре -->
+    <androidx.media3.ui.SubtitleView
+        android:id="@+id/onlineSubtitles"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:focusable="false" />
+
     <ProgressBar
         android:id="@+id/playerProgress"
         android:layout_width="wrap_content"

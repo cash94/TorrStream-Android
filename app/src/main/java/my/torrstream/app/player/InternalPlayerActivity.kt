@@ -61,6 +61,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -127,6 +128,9 @@ class InternalPlayerActivity : AppCompatActivity() {
         const val TIMECODE_API = "timecode_api"  // POST endpoint that stores playback progress
         const val CLIENT_ID = "client_id"
         const val FOCUS_COLOR = "focus_color"  // «#rrggbb» из «Внешнего вида» веб-интерфейса
+        // String[] parallel to the queue (one item without a playlist): what «Онлайн субтитры»
+        // search for, JSON {tmdb_id, type, season, episode}; "" — the web UI doesn't know
+        const val ONLINE_SUBS = "online_subs"
     }
 
     private data class SkipRange(val type: String, val startMs: Long, val endMs: Long) {
@@ -155,6 +159,9 @@ class InternalPlayerActivity : AppCompatActivity() {
          * откладывается на столько (всего минута, как заставка веб-плеера на паузе).
          */
         private const val SCREEN_SAVER_SUBS_EXTRA_MS = 45_000L
+        /** Онлайн-субтитры: как часто сверять реплику с позицией и шаг «раньше / позже». */
+        private const val ONLINE_SUBS_TICK_MS = 150L
+        private const val ONLINE_SUBS_STEP_MS = 500L
         private const val NEW_LINE = "\n"
 
         /**
@@ -339,6 +346,25 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private var timecodeJob: Job? = null
 
+    // «Онлайн субтитры» (OnlineSubtitles): реплики рисует свой SubtitleView поверх кадра по
+    // позиции плеера — одинаково для ExoPlayer и libVLC, и встроенные дорожки ему не мешают
+    private lateinit var onlineSubsView: SubtitleView
+    private val onlineStore by lazy { OnlineSubtitles.Store(this) }
+    private var onlineFileKey: String? = null      // «hash_index» файла, для которого всё ниже
+    private var onlineHash: String? = null
+    private var onlineTarget: OnlineSubtitles.Target? = null
+    private var onlineList: List<OnlineSubtitles.Sub>? = null
+    private var onlineAfterSearch: ((List<OnlineSubtitles.Sub>) -> Unit)? = null
+    private var onlineSearchJob: Job? = null
+    private var onlineLoadJob: Job? = null
+    private var onlineActive: OnlineSubtitles.Sub? = null
+    private var onlineCues: List<OnlineSubtitles.Cue> = emptyList()
+    private var onlineLoadingUrl: String? = null
+    private var onlineFailedUrl: String? = null
+    private var onlineOffsetMs = 0L
+    private var onlineLastText: String? = null
+    private var onlinePanelActions: List<() -> Unit>? = null  // список открытой панели онлайн-субтитров
+
     private lateinit var sidePanel: View
     private lateinit var sidePanelTitle: TextView
     private lateinit var sidePanelList: ListView
@@ -448,6 +474,7 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private fun bindViews() {
         playerView = findViewById(R.id.playerView)
+        onlineSubsView = findViewById(R.id.onlineSubtitles)
         // Рамка видео зависит от размера экрана: поворот, мультиоконный режим. Из onLayout
         // менять разметку нельзя — через post
         playerView.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
@@ -608,7 +635,7 @@ class InternalPlayerActivity : AppCompatActivity() {
     private val enterScreenSaver = Runnable {
         if (player?.isPlaying == true) return@Runnable
         // Пелена гасила и реплику, ради которой поставили паузу (так было и в веб-плеере)
-        if (!screenSaverDeferred && player?.currentCues?.cues?.isNotEmpty() == true) {
+        if (!screenSaverDeferred && (player?.currentCues?.cues?.isNotEmpty() == true || !onlineLastText.isNullOrEmpty())) {
             screenSaverDeferred = true
             handler.postDelayed(enterScreenSaverRef, SCREEN_SAVER_SUBS_EXTRA_MS)
             return@Runnable
@@ -832,6 +859,8 @@ class InternalPlayerActivity : AppCompatActivity() {
             // Без плашки: белый текст с чёрной обводкой поверх кадра, как в веб-плеере
             setStyle(SUBTITLE_STYLE)
         }
+        onlineSubsView.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale)
+        onlineSubsView.setStyle(SUBTITLE_STYLE)
     }
 
     private fun showBufferPanel() {
@@ -1119,6 +1148,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         opener: View?,
         itemLayout: Int = R.layout.item_side_panel,
         back: (() -> Unit)? = null,
+        focusIndex: Int = checkedIndex,
     ) {
         sidePanelActions = actions
         sidePanelOpener = opener
@@ -1128,10 +1158,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         // Without this the tick from a previous panel (say episode 3) survives into the next one.
         sidePanelList.clearChoices()
         sidePanelList.adapter = sidePanelAdapter(itemLayout, labels)
-        if (checkedIndex in labels.indices) {
-            sidePanelList.setItemChecked(checkedIndex, true)
-            sidePanelList.setSelection(checkedIndex)
-        }
+        if (checkedIndex in labels.indices) sidePanelList.setItemChecked(checkedIndex, true)
+        if (focusIndex in labels.indices) sidePanelList.setSelection(focusIndex)
 
         handler.removeCallbacks(hideControls)
         setControlsVisible(false)
@@ -1333,13 +1361,13 @@ class InternalPlayerActivity : AppCompatActivity() {
      * рисует их в самом кадре — там не сдвинуть.
      */
     private fun raiseSubtitles(hudVisible: Boolean) {
-        val view = playerView.subtitleView ?: return
         val panel = controlsPanel.height
         val screen = playerView.height
-        view.setBottomPaddingFraction(
-            if (hudVisible && panel > 0 && screen > 0) panel.toFloat() / screen
-            else SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION
-        )
+        val fraction = if (hudVisible && panel > 0 && screen > 0) panel.toFloat() / screen
+        else SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION
+        playerView.subtitleView?.setBottomPaddingFraction(fraction)
+        // Онлайн-субтитры рисуем сами — их поднимаем и при libVLC
+        onlineSubsView.setBottomPaddingFraction(fraction)
     }
 
     /** Плавное появление и угасание, как у веб-плеера; когда угасание закончилось — GONE. */
@@ -1874,11 +1902,13 @@ class InternalPlayerActivity : AppCompatActivity() {
             labels = listOf(
                 withDescription(getString(R.string.player_track_audio), audio),
                 withDescription(getString(R.string.player_subtitles), subtitles),
+                withDescription(getString(R.string.player_online_subs), onlineSummary()),
             ),
             checkedIndex = -1,
             actions = listOf(
                 { showTrackDialog(C.TRACK_TYPE_AUDIO, fromMenu = true) },
                 { showTrackDialog(C.TRACK_TYPE_TEXT, fromMenu = true) },
+                { showOnlineSubsPanel() },
             ),
             opener = btnTracks,
             itemLayout = R.layout.item_side_panel_desc,
@@ -1929,6 +1959,8 @@ class InternalPlayerActivity : AppCompatActivity() {
                 labels += describeTrack(group, i, labels.size)
                 val mediaGroup = group.mediaTrackGroup
                 actions += {
+                    // Обычные и онлайн-субтитры взаимоисключающие
+                    if (trackType == C.TRACK_TYPE_TEXT) onlineOff()
                     p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                         .setTrackTypeDisabled(trackType, false)
                         .setOverrideForType(TrackSelectionOverride(mediaGroup, i))
@@ -1952,6 +1984,287 @@ class InternalPlayerActivity : AppCompatActivity() {
             back = if (fromMenu) ({ showTracksMenu() }) else null,
         )
     }
+
+    // region online subtitles
+
+    /** Ключ файла «hash_index» и hash раздачи текущего элемента; null — не ссылка TorrServer. */
+    private fun onlineFileKeyOf(p: Player): Pair<String, String>? {
+        val uri = p.currentMediaItem?.localConfiguration?.uri ?: return null
+        val hash = uri.getQueryParameter("link")?.let { infoHashFrom(it) }?.lowercase() ?: return null
+        val index = uri.getQueryParameter("index") ?: return null
+        return "${hash}_$index" to hash
+    }
+
+    private fun onlineTargetFor(p: Player): OnlineSubtitles.Target? {
+        val all = intent.getStringArrayExtra(Extras.ONLINE_SUBS) ?: return null
+        val json = if (all.size == p.mediaItemCount) all.getOrNull(p.currentMediaItemIndex) else all.singleOrNull()
+        return OnlineSubtitles.Target.fromJson(json)
+    }
+
+    /**
+     * Новый элемент очереди (или пересборка плеера). Тот же файл — всё остаётся; иначе
+     * восстанавливаем выбор файла, а нет его — первые субтитры языка, выбранного в раздаче.
+     */
+    private fun onlineOnItem() {
+        val p = player ?: return
+        val (key, hash) = onlineFileKeyOf(p) ?: run { onlineReset(); return }
+        if (key == onlineFileKey) {
+            if (onlineActive != null) startOnlineTick()
+            return
+        }
+        onlineReset()
+        onlineFileKey = key
+        onlineHash = hash
+        onlineTarget = onlineTargetFor(p)
+        Log.d(TAG, "Online subtitles for $key: $onlineTarget")
+        onlineStore.fileChoice(key)?.let { (sub, offset) ->
+            onlineOffsetMs = offset
+            onlineLoad(sub, quiet = true)
+            return
+        }
+        val lang = onlineStore.torrentLang(hash) ?: return
+        onlineEnsureList { list ->
+            if (onlineActive != null || onlineLoadingUrl != null || selectedTrackName(C.TRACK_TYPE_TEXT) != null) return@onlineEnsureList
+            list.firstOrNull { it.lang == lang }?.let { onlineLoad(it, quiet = true) }
+        }
+    }
+
+    private fun onlineReset() {
+        onlineSearchJob?.cancel()
+        onlineLoadJob?.cancel()
+        stopOnlineTick()
+        onlineFileKey = null
+        onlineHash = null
+        onlineTarget = null
+        onlineList = null
+        onlineAfterSearch = null
+        onlineActive = null
+        onlineCues = emptyList()
+        onlineLoadingUrl = null
+        onlineFailedUrl = null
+        onlineOffsetMs = 0L
+    }
+
+    private fun onlineEnsureList(then: ((List<OnlineSubtitles.Sub>) -> Unit)? = null) {
+        onlineList?.let { list -> then?.invoke(list); return }
+        if (then != null) onlineAfterSearch = then
+        if (onlineSearchJob?.isActive == true) return
+        val target = onlineTarget ?: run {
+            onlineList = emptyList()
+            refreshOnlinePanel()
+            onlineAfterSearch?.invoke(emptyList())
+            onlineAfterSearch = null
+            return
+        }
+        val key = onlineFileKey
+        onlineSearchJob = lifecycleScope.launch {
+            val list = withContext(Dispatchers.IO) {
+                try {
+                    OnlineSubtitles.search(target)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Online subtitles search failed: ${e.message}")
+                    emptyList()
+                }
+            }
+            if (key != onlineFileKey) return@launch
+            onlineList = list
+            refreshOnlinePanel()
+            onlineAfterSearch?.invoke(list)
+            onlineAfterSearch = null
+        }
+    }
+
+    /** Скачать и включить. quiet — восстановление выбора: панель и тосты не трогаем. */
+    private fun onlineLoad(sub: OnlineSubtitles.Sub, quiet: Boolean) {
+        val key = onlineFileKey ?: return
+        onlineLoadingUrl = sub.url
+        onlineFailedUrl = null
+        refreshOnlinePanel()
+        onlineLoadJob?.cancel()
+        onlineLoadJob = lifecycleScope.launch {
+            val cues = withContext(Dispatchers.IO) {
+                try {
+                    OnlineSubtitles.download(sub)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Online subtitles ${sub.url}: ${e.message}")
+                    null
+                }
+            }
+            if (key != onlineFileKey || onlineLoadingUrl != sub.url) return@launch
+            onlineLoadingUrl = null
+            if (cues.isNullOrEmpty()) {
+                onlineFailedUrl = sub.url
+                refreshOnlinePanel()
+                if (!quiet) App.toast(R.string.player_online_subs_failed, false)
+                return@launch
+            }
+            disableRegularSubtitles()
+            onlineActive = sub
+            onlineCues = cues
+            onlineLastText = null
+            onlineRemember()
+            startOnlineTick()
+            if (!quiet && onlinePanelShown) hideSidePanel() else refreshOnlinePanel()
+        }
+    }
+
+    /** Онлайн включились — встроенные выключаем (у libVLC это setSpuTrack(-1)). */
+    private fun disableRegularSubtitles() {
+        val p = player ?: return
+        if (C.TRACK_TYPE_TEXT in p.trackSelectionParameters.disabledTrackTypes) return
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+    }
+
+    /** Выключить: и для файла, и язык раздачи — следующие серии тоже без них. */
+    private fun onlineOff() {
+        if (onlineActive == null && onlineLoadingUrl == null) return
+        onlineLoadJob?.cancel()
+        onlineActive = null
+        onlineCues = emptyList()
+        onlineLoadingUrl = null
+        stopOnlineTick()
+        onlineRemember()
+    }
+
+    private fun onlineRemember() {
+        val key = onlineFileKey ?: return
+        val hash = onlineHash ?: return
+        onlineStore.save(key, hash, onlineActive, onlineOffsetMs)
+    }
+
+    private fun onlineShift(deltaMs: Long) {
+        onlineOffsetMs += deltaMs
+        onlineLastText = null
+        onlineRemember()
+        showOnlineText()
+    }
+
+    private val onlineTick = object : Runnable {
+        override fun run() {
+            showOnlineText()
+            handler.postDelayed(this, ONLINE_SUBS_TICK_MS)
+        }
+    }
+
+    private fun startOnlineTick() {
+        handler.removeCallbacks(onlineTick)
+        handler.post(onlineTick)
+    }
+
+    private fun stopOnlineTick() {
+        handler.removeCallbacks(onlineTick)
+        onlineLastText = null
+        onlineSubsView.setCues(emptyList())
+    }
+
+    private fun showOnlineText() {
+        val p = player
+        val text = if (p == null || onlineActive == null) ""
+        else OnlineSubtitles.textAt(onlineCues, p.currentPosition - onlineOffsetMs)
+        if (text == onlineLastText) return
+        onlineLastText = text
+        onlineSubsView.setCues(if (text.isEmpty()) emptyList() else listOf(Cue.Builder().setText(text).build()))
+    }
+
+    private fun onlineOffsetLabel(): String {
+        val sec = String.format(Locale.getDefault(), "%.1f", kotlin.math.abs(onlineOffsetMs) / 1000.0)
+        val sign = if (onlineOffsetMs > 0) "+" else if (onlineOffsetMs < 0) "−" else ""
+        return getString(R.string.player_online_subs_sec, sign + sec)
+    }
+
+    private fun onlineSubTitle(sub: OnlineSubtitles.Sub): String =
+        languageName(sub.lang) + (if (sub.name.isNotBlank()) " · ${sub.name}" else "")
+
+    /** Подпись в меню «Аудио и субтитры». */
+    private fun onlineSummary(): String {
+        val sub = onlineActive ?: return getString(
+            if (onlineLoadingUrl != null) R.string.player_online_subs_loading else R.string.player_online_subs_disabled
+        )
+        return onlineSubTitle(sub) + (if (onlineOffsetMs != 0L) " · ${onlineOffsetLabel()}" else "")
+    }
+
+    private val onlinePanelShown: Boolean
+        get() = sidePanelOpen && onlinePanelActions != null && sidePanelActions === onlinePanelActions
+
+    /** Список пришёл или файл загрузился — перерисовать открытую панель на той же строке. */
+    private fun refreshOnlinePanel() {
+        if (onlinePanelShown) showOnlineSubsPanel(focusIndex = sidePanelList.selectedItemPosition)
+    }
+
+    /**
+     * Панель «Онлайн субтитры»: выключить, сдвиг раньше/позже (пока включены), найденные
+     * субтитры. Поиск — при первом открытии для файла.
+     */
+    private fun showOnlineSubsPanel(focusIndex: Int? = null) {
+        if (player == null) return
+        if (onlineFileKey == null) onlineOnItem()
+        val labels = mutableListOf<CharSequence>()
+        val actions = mutableListOf<() -> Unit>()
+        val stay = { showOnlineSubsPanel(focusIndex = sidePanelList.selectedItemPosition) }
+        var checked = -1
+
+        labels += getString(R.string.player_online_subs_off)
+        actions += { onlineOff() }
+        if (onlineActive == null && onlineLoadingUrl == null) checked = 0
+        if (onlineActive != null) {
+            labels += withDescription(
+                getString(R.string.player_online_subs_earlier),
+                getString(R.string.player_online_subs_offset, onlineOffsetLabel())
+            )
+            actions += { onlineShift(-ONLINE_SUBS_STEP_MS); stay() }
+            labels += withDescription(
+                getString(R.string.player_online_subs_later), getString(R.string.player_online_subs_step)
+            )
+            actions += { onlineShift(ONLINE_SUBS_STEP_MS); stay() }
+        }
+
+        val list = onlineList
+        val info = when {
+            onlineTarget == null && list != null -> R.string.player_online_subs_unknown
+            list == null -> R.string.player_online_subs_searching
+            list.isEmpty() -> R.string.player_online_subs_none
+            else -> 0
+        }
+        if (info != 0) {
+            labels += getString(info)
+            actions += stay
+        }
+        list?.forEach { sub ->
+            val details = mutableListOf(sub.lang.uppercase(Locale.ROOT), sub.source)
+            if (sub.hi) details += getString(R.string.player_online_subs_hi)
+            when (sub.url) {
+                onlineLoadingUrl -> details += getString(R.string.player_online_subs_loading)
+                onlineFailedUrl -> details += getString(R.string.player_online_subs_failed)
+            }
+            if (sub.url == onlineActive?.url) checked = labels.size
+            labels += withDescription(onlineSubTitle(sub), details.joinToString(" · "))
+            actions += {
+                if (sub.url != onlineActive?.url) {
+                    onlineOffsetMs = 0L
+                    onlineLoad(sub, quiet = false)
+                    stay()
+                }
+            }
+        }
+
+        onlinePanelActions = actions
+        showSidePanel(
+            titleRes = R.string.player_online_subs,
+            labels = labels,
+            checkedIndex = checked,
+            actions = actions,
+            opener = btnTracks,
+            itemLayout = R.layout.item_side_panel_desc,
+            back = { showTracksMenu() },
+            focusIndex = focusIndex?.takeIf { it in labels.indices } ?: checked,
+        )
+        if (list == null) onlineEnsureList()
+    }
+
+    // endregion
 
     private fun describeTrack(group: Tracks.Group, index: Int, fallbackIndex: Int): String {
         val format = group.getTrackFormat(index)
@@ -2169,6 +2482,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         newPlayer.setMediaItems(items, startIndex, startPosition)
         newPlayer.playWhenReady = true
         newPlayer.prepare()
+        onlineOnItem()
 
         updateTitle()
         updateEpisodeButtons()
@@ -2356,6 +2670,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             skipRanges = emptyList()
             offeredSkipKeys.clear()
             hideSkipButton()
+            onlineOnItem()
         }
 
         override fun onTracksChanged(tracks: Tracks) {
@@ -2528,6 +2843,7 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private fun releasePlayer() {
         snapshotPosition()
+        handler.removeCallbacks(onlineTick)
         timecodeJob?.cancel()
         timecodeJob = null
         player?.let {

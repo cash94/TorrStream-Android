@@ -2845,6 +2845,14 @@ class MainActivity : BaseActivity(),
                 )
             }
 
+            // «Онлайн субтитры»: что искать для каждого элемента очереди (как PLAYLIST_URLS),
+            // «» — веб не знает, что это за фильм или серия
+            val onlineSubs = if (state.playlist.size > 1) state.playlist.map { it.onlineSubs.orEmpty() }
+            else listOf(currentItem.onlineSubs.orEmpty())
+            if (onlineSubs.any { it.isNotEmpty() }) {
+                putExtra(InternalPlayerActivity.Extras.ONLINE_SUBS, onlineSubs.toTypedArray())
+            }
+
             // Skip intro/credits: the player queries the API itself per episode.
             jsonObject.optString("skip_api").takeIf { it.isNotBlank() }?.let {
                 putExtra(InternalPlayerActivity.Extras.SKIP_API, it)

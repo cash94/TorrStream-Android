@@ -96,6 +96,8 @@ class PlayerStateManager(context: Context) {
      * @property episodeTitle Ready-made episode label from the web UI, e.g. "Серия 1 - Зима близко"
      *   (number and TMDB name). Separate from [title], which external players and older builds
      *   still get as before; absent when the web UI is older or knows nothing about the episode.
+     * @property onlineSubs What «Онлайн субтитры» of the built-in player search for, as the web UI
+     *   sends it: raw JSON {tmdb_id, type, season, episode}; absent when the film is unknown.
      */
     data class PlaylistItem(
         val url: String,
@@ -108,7 +110,8 @@ class PlayerStateManager(context: Context) {
         val season: Int? = null,
         val episode: Int? = null,
         val imdbId: String? = null,
-        val episodeTitle: String? = null
+        val episodeTitle: String? = null,
+        val onlineSubs: String? = null
     ) {
         /**
          * Data class representing playback timeline information.
@@ -750,7 +753,8 @@ class PlayerStateManager(context: Context) {
             imdbId = optString("imdb_id").takeIf { it.isNotEmpty() }
                 ?: optJSONObject("card")?.optString("imdb_id")?.takeIf { it.isNotEmpty() },
 
-            episodeTitle = optString("episode_title").takeIf { it.isNotEmpty() }
+            episodeTitle = optString("episode_title").takeIf { it.isNotEmpty() },
+            onlineSubs = optJSONObject("online_subs")?.toString()
         )
     }
 
@@ -827,6 +831,7 @@ class PlayerStateManager(context: Context) {
             episode?.let { put("episode", it) }
             imdbId?.let { put("imdb_id", it) }
             episodeTitle?.let { put("episode_title", it) }
+            onlineSubs?.let { put("online_subs", JSONObject(it)) }
         }
     }
 
