@@ -17,6 +17,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Build.VERSION
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.format.Formatter
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -142,6 +143,9 @@ class MainActivity : BaseActivity(),
     private var engineImportOrigin: String? = null
     private var engineImportStarted = false
     private var isMenuVisible = false
+
+    /** downTime последнего Escape, посланного странице вместо «Назад» (backToPage). */
+    private var pageEscapeDownTime = -1L
     private lateinit var loaderView: View
     // Страница загрузилась, экран загрузки уходит (dismissLoader)
     private var loaderDismissed = false
@@ -409,8 +413,14 @@ class MainActivity : BaseActivity(),
      * удержание (onKeyLongPress). Без этого ESCAPE и нестандартные коды уходили в WebView,
      * страница их не знает — RETURN на пультах Tanix, X96 и их клонов не делал ничего.
      */
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
-        super.dispatchKeyEvent(RemoteKeys.toBack(this, event) ?: event)
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Наш же Escape из backToPage, который страница не обработала: WebView возвращает
+        // такие нажатия в окно (onUnhandledKeyEvent). Подменить его на «Назад» — значит
+        // снова послать Escape, и так по кругу. Глушим.
+        if (event.keyCode == KeyEvent.KEYCODE_ESCAPE && event.downTime == pageEscapeDownTime)
+            return true
+        return super.dispatchKeyEvent(RemoteKeys.toBack(this, event) ?: event)
+    }
 
     // Удержание «Назад» — меню приложения или, если так выбрано в «Об устройстве», выход
     override fun onKeyLongPress(keyCode: Int, event: KeyEvent): Boolean {
@@ -624,19 +634,46 @@ class MainActivity : BaseActivity(),
                 android.R.anim.fade_in,
                 android.R.anim.fade_out
             )
-        onBackPressedDispatcher.addCallback {
-            if (browser?.canGoBack() == true) {
-                // browser?.goBack()
-                // no Back with no focused webView workaround
-                runVoidJsFunc("window.history.back", "")
-            } else {
-                // This callback swallows the press either way, so it must never end up doing
-                // nothing: with an empty WebView history that reads as a dead Back button.
-                // Deliver the same Escape the page's own popstate handler synthesises, so
-                // screens still close normally even if the history sentinel was lost.
-                runVoidJsFunc(JS_BACK_FALLBACK, "")
-            }
+        onBackPressedDispatcher.addCallback { backToPage() }
+    }
+
+    /**
+     * «Назад» в веб-интерфейс — настоящим нажатием Escape в WebView.
+     *
+     * Раньше шли через window.history.back(): страница ловит popstate и сама шлёт себе Escape.
+     * На приставках Tanix это не срабатывало — «Назад» не делал ничего, хотя «Стереть»
+     * (настоящая клавиша, Backspace) работала. Настоящая клавиша доходит до обработчика
+     * клавиш страницы так же, как с клавиатуры, без истории и без синтетического события.
+     *
+     * История нужна, только когда WebView ушёл со страницы приложения на чужую (вход,
+     * внешняя ссылка), — тогда обычный goBack.
+     */
+    private fun backToPage() {
+        val web = browser?.getView() as? WebView
+        val url = web?.url
+        val appPage = url == null || isAppPage(url)
+        if (BuildConfig.VERSION_NAME.contains("-g")) // только тестовые сборки — для проверки
+            App.toast("Назад: canGoBack=${web?.canGoBack()}, страница приложения=$appPage", false)
+        if (web == null || !loaderDismissed) {
+            runVoidJsFunc(JS_BACK_FALLBACK, "")
+            return
         }
+        if (!appPage && web.canGoBack()) {
+            web.goBack()
+            return
+        }
+        // Без фокуса WebView клавиша до страницы не доходит
+        if (!web.hasFocus()) web.requestFocus()
+        val now = SystemClock.uptimeMillis()
+        pageEscapeDownTime = now
+        web.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ESCAPE, 0))
+        web.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ESCAPE, 0))
+    }
+
+    /** Страница с адреса приложения (или служебная: about:, data:), а не чужой сайт. */
+    private fun isAppPage(url: String): Boolean {
+        val host = url.toUri().host ?: return true
+        return host.equals(LAMPA_URL.toUri().host, ignoreCase = true)
     }
 
     private fun setupBrowser() {
