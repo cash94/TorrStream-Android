@@ -652,8 +652,6 @@ class MainActivity : BaseActivity(),
         val web = browser?.getView() as? WebView
         val url = web?.url
         val appPage = url == null || isAppPage(url)
-        if (BuildConfig.VERSION_NAME.contains("-g")) // только тестовые сборки — для проверки
-            App.toast("Назад: canGoBack=${web?.canGoBack()}, страница приложения=$appPage", false)
         if (web == null || !loaderDismissed) {
             runVoidJsFunc(JS_BACK_FALLBACK, "")
             return
