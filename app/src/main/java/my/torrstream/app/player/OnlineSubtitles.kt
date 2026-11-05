@@ -19,6 +19,10 @@ import java.nio.charset.CodingErrorAction
  * Серии в TheSubtitleDB — по IMDb самой серии (seasons[].episodes[].imdb): параметры
  * season/episode он молча не учитывает и отдаёт чужие серии.
  *
+ * Прокси (apiproxy.json: subsApi, конфиг nginx — tools/nginx в videoloop-server)
+ * веб присылает базой в online_subs_proxy: сначала идём через него, при отказе —
+ * напрямую. Адреса файлов храним всегда прямые — выбор переживает смену прокси.
+ *
  * Всё сетевое здесь блокирующее — звать из Dispatchers.IO.
  */
 object OnlineSubtitles {
@@ -28,6 +32,19 @@ object OnlineSubtitles {
     private const val OS_STREMIO_API = "https://opensubtitles-v3.strem.io/subtitles/"
     private const val PER_LANG = 15
     private const val TIMEOUT_MS = 12_000
+    private const val PROXY_TIMEOUT_MS = 8_000
+    /** Прокси не ответил или лёг (5xx) — столько его не трогаем. */
+    private const val PROXY_REST_MS = 5 * 60_000L
+    private val DIRECT_RE =
+        Regex("""^https://(api\.thesubtitledb\.org|opensubtitles-v3\.strem\.io|subs\d*\.strem\.io)/(.*)$""")
+    private val PROXIED_RE = Regex("""^https?://([^/]+)/(tsdb|os|strem/(subs\d*\.strem\.io))/(.*)$""")
+
+    /** База прокси, «http://tssubs.torrstream.online»; null — напрямую. Ставит плеер. */
+    @Volatile
+    var proxyBase: String? = null
+
+    @Volatile
+    private var proxyDownUntil = 0L
     private val FORMATS = setOf("srt", "vtt", "webvtt", "ass", "ssa")
 
     data class Lang(val code: String, val os: String)
@@ -127,7 +144,7 @@ object OnlineSubtitles {
             for (k in 0 until (osSubs?.length() ?: 0)) {
                 if (count >= PER_LANG) break
                 val s = osSubs!!.optJSONObject(k) ?: continue
-                val url = s.optString("url").takeIf { it.isNotBlank() } ?: continue
+                val url = s.optString("url").takeIf { it.isNotBlank() }?.let { direct(it) } ?: continue
                 if (lang(s.optString("lang")) != l || !seen.add(url)) continue
                 val name = s.optString("subtitleFileName").ifBlank { s.optString("movieReleaseName") }.trim()
                 // strem.io сам перекодирует в UTF-8 (subencoding-stremio-utf8 в адресе)
@@ -158,7 +175,7 @@ object OnlineSubtitles {
         for (i in 0 until items.length()) {
             val s = items.optJSONObject(i) ?: continue
             val fmt = s.optString("format", "srt").lowercase()
-            val url = s.optString("download_url").takeIf { it.isNotBlank() } ?: continue
+            val url = s.optString("download_url").takeIf { it.isNotBlank() }?.let { direct(it) } ?: continue
             if (fmt !in FORMATS) continue
             out += Sub(
                 lang, url, fmt, s.optString("encoding"), s.optString("release_name").trim(),
@@ -175,17 +192,68 @@ object OnlineSubtitles {
         null
     }
 
+    /** Прямой адрес сервиса → тот же через прокси; null — прокси нет, отдыхает или адрес не его. */
+    fun proxied(url: String, base: String? = proxyBase): String? {
+        val b = base?.trimEnd('/')?.takeIf { it.isNotBlank() } ?: return null
+        val m = DIRECT_RE.find(url) ?: return null
+        val host = m.groupValues[1]
+        val prefix = when (host) {
+            "api.thesubtitledb.org" -> "/tsdb/"
+            "opensubtitles-v3.strem.io" -> "/os/"
+            else -> "/strem/$host/"
+        }
+        return b + prefix + m.groupValues[2]
+    }
+
+    /** Ссылка из ответа прокси (он переписывает их на себя, с $host — без порта) → прямой адрес. */
+    fun direct(url: String, base: String? = proxyBase): String {
+        val proxyHost = base?.substringAfter("://")?.substringBefore('/')?.substringBefore(':')
+            ?.takeIf { it.isNotBlank() } ?: return url
+        val m = PROXIED_RE.find(url) ?: return url
+        if (m.groupValues[1].substringBefore(':') != proxyHost) return url
+        val host = when (m.groupValues[2]) {
+            "tsdb" -> "api.thesubtitledb.org"
+            "os" -> "opensubtitles-v3.strem.io"
+            else -> m.groupValues[3]
+        }
+        return "https://$host/${m.groupValues[4]}"
+    }
+
+    /**
+     * Сначала через прокси, при отказе — напрямую. Прокси не ответил или лёг (5xx) —
+     * [PROXY_REST_MS] его не трогаем; иной отказ (404, 429 лимита) просто повторяем напрямую.
+     */
     private fun fetchBytes(url: String): ByteArray? {
+        val viaProxy = if (System.currentTimeMillis() < proxyDownUntil) null else proxied(url)
+        if (viaProxy != null) {
+            try {
+                val (code, body) = rawFetch(viaProxy, PROXY_TIMEOUT_MS)
+                if (body != null) return body
+                if (code >= 500) proxyFailed("HTTP $code")
+            } catch (e: Exception) {
+                proxyFailed(e.message)
+            }
+        }
+        return rawFetch(url, TIMEOUT_MS).second
+    }
+
+    private fun proxyFailed(reason: String?) {
+        proxyDownUntil = System.currentTimeMillis() + PROXY_REST_MS
+        Log.w(TAG, "Proxy $proxyBase failed ($reason) — going direct")
+    }
+
+    /** Код ответа и тело (только при 2xx). */
+    private fun rawFetch(url: String, timeoutMs: Int): Pair<Int, ByteArray?> {
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = TIMEOUT_MS
-                readTimeout = TIMEOUT_MS
+                connectTimeout = timeoutMs
+                readTimeout = timeoutMs
                 instanceFollowRedirects = true
                 setRequestProperty("User-Agent", "TorrStream")
             }
-            if (connection.responseCode !in 200..299) null
-            else connection.inputStream.use { it.readBytes() }
+            val code = connection.responseCode
+            code to (if (code in 200..299) connection.inputStream.use { it.readBytes() } else null)
         } finally {
             connection?.disconnect()
         }

@@ -2852,6 +2852,10 @@ class MainActivity : BaseActivity(),
             if (onlineSubs.any { it.isNotEmpty() }) {
                 putExtra(InternalPlayerActivity.Extras.ONLINE_SUBS, onlineSubs.toTypedArray())
             }
+            // Прокси онлайн-субтитров: «http://tssubs.torrstream.online», пусто — напрямую
+            jsonObject.optString("online_subs_proxy").takeIf { it.startsWith("http") }?.let {
+                putExtra(InternalPlayerActivity.Extras.ONLINE_SUBS_PROXY, it)
+            }
 
             // Skip intro/credits: the player queries the API itself per episode.
             jsonObject.optString("skip_api").takeIf { it.isNotBlank() }?.let {

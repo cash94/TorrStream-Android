@@ -1,6 +1,7 @@
 package my.torrstream.app.player
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class OnlineSubtitlesTest {
@@ -53,5 +54,31 @@ class OnlineSubtitlesTest {
         assertEquals("a", OnlineSubtitles.textAt(cues, 4000))
         assertEquals("", OnlineSubtitles.textAt(cues, 5500))
         assertEquals("c", OnlineSubtitles.textAt(cues, 6000))
+    }
+
+    private val proxy = "http://tssubs.torrstream.online"
+
+    @Test
+    fun mapsServicesToProxyPaths() {
+        assertEquals("$proxy/tsdb/v1/by-tmdb/movie/603?lang=ru",
+            OnlineSubtitles.proxied("https://api.thesubtitledb.org/v1/by-tmdb/movie/603?lang=ru", proxy))
+        assertEquals("$proxy/os/subtitles/movie/tt0133093.json",
+            OnlineSubtitles.proxied("https://opensubtitles-v3.strem.io/subtitles/movie/tt0133093.json", proxy))
+        assertEquals("$proxy/strem/subs5.strem.io/en/download/file/1",
+            OnlineSubtitles.proxied("https://subs5.strem.io/en/download/file/1", "$proxy/"))
+        assertNull(OnlineSubtitles.proxied("https://evil.com/x", proxy))
+        assertNull(OnlineSubtitles.proxied("https://api.thesubtitledb.org/v1/x", null))
+    }
+
+    @Test
+    fun proxyLinksBackToDirect() {
+        assertEquals("https://api.thesubtitledb.org/get/7249229",
+            OnlineSubtitles.direct("http://tssubs.torrstream.online/tsdb/get/7249229", proxy))
+        assertEquals("https://subs5.strem.io/en/download/file/1",
+            OnlineSubtitles.direct("https://tssubs.torrstream.online/strem/subs5.strem.io/en/download/file/1", proxy))
+        // Чужой хост и прямые адреса не трогаем
+        assertEquals("http://other.host/tsdb/get/1", OnlineSubtitles.direct("http://other.host/tsdb/get/1", proxy))
+        assertEquals("https://api.thesubtitledb.org/get/1",
+            OnlineSubtitles.direct("https://api.thesubtitledb.org/get/1", proxy))
     }
 }

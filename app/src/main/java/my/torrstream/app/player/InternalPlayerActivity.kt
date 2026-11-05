@@ -131,6 +131,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         // String[] parallel to the queue (one item without a playlist): what «Онлайн субтитры»
         // search for, JSON {tmdb_id, type, season, episode}; "" — the web UI doesn't know
         const val ONLINE_SUBS = "online_subs"
+        // Base of the online-subtitles proxy (apiproxy.json: subsApi); absent — straight to the services
+        const val ONLINE_SUBS_PROXY = "online_subs_proxy"
     }
 
     private data class SkipRange(val type: String, val startMs: Long, val endMs: Long) {
@@ -2482,6 +2484,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         newPlayer.setMediaItems(items, startIndex, startPosition)
         newPlayer.playWhenReady = true
         newPlayer.prepare()
+        OnlineSubtitles.proxyBase = intent.getStringExtra(Extras.ONLINE_SUBS_PROXY)
         onlineOnItem()
 
         updateTitle()
