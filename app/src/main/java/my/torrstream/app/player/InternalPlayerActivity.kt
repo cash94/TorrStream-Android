@@ -78,7 +78,6 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
@@ -357,6 +356,9 @@ class InternalPlayerActivity : AppCompatActivity() {
     private var skipFetchedForIndex = -1
 
     private var timecodeJob: Job? = null
+
+    /** Отрисовка ASS через libass — только у ExoPlayer, у libVLC она своя. */
+    private var assSubtitles: AssSubtitles? = null
 
     // «Онлайн субтитры» (OnlineSubtitles): реплики рисует свой SubtitleView поверх кадра по
     // позиции плеера — одинаково для ExoPlayer и libVLC, и встроенные дорожки ему не мешают
@@ -654,7 +656,9 @@ class InternalPlayerActivity : AppCompatActivity() {
             return@Runnable
         }
         // Пелена гасила и реплику, ради которой поставили паузу (так было и в веб-плеере)
-        if (!screenSaverDeferred && (player?.currentCues?.cues?.isNotEmpty() == true || !onlineLastText.isNullOrEmpty())) {
+        if (!screenSaverDeferred && (player?.currentCues?.cues?.isNotEmpty() == true ||
+                    assSubtitles?.hasSelectedTrack == true || !onlineLastText.isNullOrEmpty())
+        ) {
             screenSaverDeferred = true
             handler.postDelayed(enterScreenSaverRef, SCREEN_SAVER_SUBS_EXTRA_MS)
             return@Runnable
@@ -878,6 +882,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             // Без плашки: белый текст с чёрной обводкой поверх кадра, как в веб-плеере
             setStyle(SUBTITLE_STYLE)
         }
+        assSubtitles?.setFontScale(scale)
         onlineSubsView.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale)
         onlineSubsView.setStyle(SUBTITLE_STYLE)
     }
@@ -1276,7 +1281,8 @@ class InternalPlayerActivity : AppCompatActivity() {
      * Режимы AspectRatioFrameLayout (вписать / обрезать / растянуть) для этого не годились:
      * у кадра 16:9 на экране 16:9 все три дают одну и ту же картинку, и впечатанные в кадр
      * полосы фильма 2,40:1 (например, 3840×2160) убрать было нечем — кнопка ничего не меняла.
-     * Субтитры остаются в рамке экрана, поэтому и в «Увеличить» не уезжают за край.
+     * Субтитры остаются в рамке экрана, поэтому и в «Увеличить» не уезжают за край. Кроме ASS:
+     * его надписи привязаны к кадру, так что слой libass идёт за рамкой поверхности.
      */
     private fun applyVideoScale() {
         val surface = playerView.videoSurfaceView ?: return
@@ -1301,6 +1307,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             w = (videoW * r).roundToInt()
             h = (videoH * r).roundToInt()
         }
+        assSubtitles?.fitTo(w, h)
         val lp = surface.layoutParams as? FrameLayout.LayoutParams
         if (lp != null && lp.width == w && lp.height == h && lp.gravity == Gravity.CENTER) return
         surface.layoutParams = (lp ?: FrameLayout.LayoutParams(w, h)).apply {
@@ -2521,6 +2528,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         newPlayer.addListener(playerListener)
         playerView.player = newPlayer
         player = newPlayer
+        (playerView.videoSurfaceView?.parent as? ViewGroup)?.let { assSubtitles?.addTo(it) }
+        applyVideoScale()
         applySubtitleSize()
 
         val items = buildMediaItems()
@@ -2572,13 +2581,14 @@ class InternalPlayerActivity : AppCompatActivity() {
             .setAllowCrossProtocolRedirects(true)
             .apply { if (headers.isNotEmpty()) setDefaultRequestProperties(headers) }
 
+        val ass = AssSubtitles(this)
         return ExoPlayer.Builder(
             this,
-            buildRenderersFactory()
+            ass.renderersFactory(buildRenderersFactory())
         )
             .setTrackSelector(DefaultTrackSelector(this))
             .setMediaSourceFactory(
-                DefaultMediaSourceFactory(DefaultDataSource.Factory(this, httpFactory))
+                ass.mediaSourceFactory(DefaultDataSource.Factory(this, httpFactory))
             )
             // How much of the stream is held in memory. LoadControl is fixed at build time, so
             // changing this setting rebuilds the player (see applyBufferSize).
@@ -2588,6 +2598,10 @@ class InternalPlayerActivity : AppCompatActivity() {
                     .build()
             )
             .build()
+            .also { exo ->
+                ass.attach(exo) { handler.post { restartPlayer("ASS in the preloaded item") } }
+                assSubtitles = ass
+            }
     }
 
     /**
@@ -2741,6 +2755,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         override fun onTracksChanged(tracks: Tracks) {
             updateEpisodeButtons()
             logTracks(tracks)
+            // Отрисовка libass появляется вместе с дорожкой, раньше масштаб задать некому
+            assSubtitles?.setFontScale(Prefs.PLAYER_SUBTITLE_SCALES[playerSubtitleSize])
             // Видео или звук есть, но ни одну дорожку этого типа ExoPlayer декодировать не
             // может: он бы играл без картинки или молча. libVLC справится со своим FFmpeg.
             if (!usingVlc) {
@@ -2917,6 +2933,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         }
         player = null
         playerView.player = null
+        assSubtitles?.release()
+        assSubtitles = null
     }
 
     override fun finish() {
