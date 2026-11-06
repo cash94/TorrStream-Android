@@ -210,7 +210,17 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val SEEK_OVERLAY_HIDE_MS = 800L
         private const val PROGRESS_TICK_MS = 500L
         private const val CONTROLS_TIMEOUT_MS = 5_000L
+
+        /** После перемотки панель живёт дольше: промахнулся — поправишь, не вызывая её заново. */
+        private const val CONTROLS_AFTER_SEEK_MS = 10_000L
         private const val SEEK_DEBOUNCE_MS = 250L
+
+        /**
+         * Пока кнопку держат, перемотка ждёт её отпускания. Это запас на потерянное отпускание:
+         * он обязан быть больше паузы перед автоповтором (около 500 мс), иначе первый шаг
+         * зажатия уходил в плеер отдельной маленькой перемоткой.
+         */
+        private const val SEEK_HOLD_COMMIT_MS = 1_000L
         private const val SEEK_BAR_STEPS = 1000
         private const val DIMMED_ALPHA = 0.3f  // .control-btn.is-disabled
 
@@ -561,7 +571,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 handler.removeCallbacks(seekCommit)
                 scrubbing = true
                 pendingSeekMs = target
-                handler.postDelayed(seekCommit, SEEK_DEBOUNCE_MS)
+                handler.postDelayed(seekCommit, if (seekKeyHeld) SEEK_HOLD_COMMIT_MS else SEEK_DEBOUNCE_MS)
                 onScrubbed(progress, target, duration)
                 showControls()
             }
@@ -636,6 +646,13 @@ class InternalPlayerActivity : AppCompatActivity() {
      */
     private val enterScreenSaver = Runnable {
         if (player?.isPlaying == true) return@Runnable
+        // Подгрузка — не пауза: isPlaying и тут false, но человек ждёт картинку. Ждём вместе
+        // с ним; нажми он паузу посреди подгрузки, onIsPlayingChanged об этом не сообщит,
+        // поэтому проверяем снова, а не бросаем
+        if (player?.playWhenReady == true) {
+            handler.postDelayed(enterScreenSaverRef, SCREEN_SAVER_DELAY_MS)
+            return@Runnable
+        }
         // Пелена гасила и реплику, ради которой поставили паузу (так было и в веб-плеере)
         if (!screenSaverDeferred && (player?.currentCues?.cues?.isNotEmpty() == true || !onlineLastText.isNullOrEmpty())) {
             screenSaverDeferred = true
@@ -1213,9 +1230,18 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     /** True only between a scrub keypress and the debounced seek landing. */
     private var scrubbing = false
+
+    /** Стрелку на полосе перемотки держат: реальная перемотка — по отпусканию. */
+    private var seekKeyHeld = false
+
+    /** Только что перемотали полосой — панель держим дольше (CONTROLS_AFTER_SEEK_MS). */
+    private var seekSettling = false
+
     private val seekCommit = Runnable {
         player?.seekTo(pendingSeekMs)
         scrubbing = false
+        seekSettling = true
+        if (controlsVisible) showControls()
     }
 
     private fun seekBy(deltaMs: Long) {
@@ -1308,13 +1334,20 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     // region controls visibility
 
-    private val hideControls = Runnable { setControlsVisible(false) }
+    private val hideControls = Runnable {
+        seekSettling = false
+        setControlsVisible(false)
+    }
 
     private fun showControls() {
         setControlsVisible(true)
         handler.removeCallbacks(hideControls)
         // Only auto-hide while something is actually playing; a paused picture keeps its controls.
-        if (player?.isPlaying == true) handler.postDelayed(hideControls, CONTROLS_TIMEOUT_MS)
+        // Перемотка гасит isPlaying на время подгрузки, поэтому отсчёт «после перемотки» идёт
+        // с момента, когда картинка снова пошла (onIsPlayingChanged), а не с отпускания кнопки.
+        if (player?.isPlaying == true) {
+            handler.postDelayed(hideControls, if (seekSettling) CONTROLS_AFTER_SEEK_MS else CONTROLS_TIMEOUT_MS)
+        }
     }
 
     /**
@@ -1395,6 +1428,16 @@ class InternalPlayerActivity : AppCompatActivity() {
     override fun dispatchKeyEvent(original: KeyEvent): Boolean {
         // RETURN пультов Tanix/X96 (ESCAPE, «B» геймпада, назначенная кнопка) — как «Назад»
         val event = RemoteKeys.toBack(this, original) ?: original
+        val seekKey = event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+            event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+        // Отпустили стрелку на полосе: теперь перематываем, короткая пауза склеит частые нажатия
+        if (event.action == KeyEvent.ACTION_UP && seekKey && seekKeyHeld) {
+            seekKeyHeld = false
+            if (scrubbing) {
+                handler.removeCallbacks(seekCommit)
+                handler.postDelayed(seekCommit, SEEK_DEBOUNCE_MS)
+            }
+        }
         if (event.action == KeyEvent.ACTION_DOWN) {
             // While dimmed, the first press only wakes: it should not also seek or open a panel.
             if (wakeFromScreenSaver()) return true
@@ -1424,6 +1467,18 @@ class InternalPlayerActivity : AppCompatActivity() {
                         setControlsVisible(false)
                         return true
                     }
+                }
+
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    // Как в веб-плеере (control.js): вниз при скрытой панели — сразу на полосу
+                    // перемотки, дальше влево/вправо перематывают без шага с кнопки паузы
+                    if (!controlsVisible && !skipButtonFocused) {
+                        showControls()
+                        seekBar.requestFocus()
+                        return true
+                    }
+                    // Автоповтор того же нажатия не должен сразу уводить с полосы на кнопки
+                    if (event.repeatCount > 0 && seekBar.hasFocus()) return true
                 }
 
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
@@ -1468,7 +1523,14 @@ class InternalPlayerActivity : AppCompatActivity() {
                 showControls()
                 return true
             }
-            if (controlsVisible) showControls() // keep it alive while the user is navigating
+            if (controlsVisible) {
+                if (seekKey) {
+                    if (seekBar.hasFocus()) seekKeyHeld = true
+                } else {
+                    seekSettling = false
+                }
+                showControls() // keep it alive while the user is navigating
+            }
         }
         return super.dispatchKeyEvent(event)
     }

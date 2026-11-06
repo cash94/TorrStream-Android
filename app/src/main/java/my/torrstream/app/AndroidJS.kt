@@ -217,6 +217,10 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     @JavascriptInterface
     fun tsDiscoverStatus(): String = TorrServerDiscovery.statusJson()
 
+    // Трейлеры RuTube идут с устройства мимо прокси сервера (browser/TrailerDirect.kt)
+    @JavascriptInterface
+    fun trailerDirect(): Boolean = true
+
     // «Об устройстве» (app.js: setupAndroidAppSettings): что делает удержание «Назад» —
     // выход из приложения или меню приложения. Меню тогда открывается кнопкой рядом
     @JavascriptInterface
