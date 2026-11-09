@@ -221,6 +221,11 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     @JavascriptInterface
     fun trailerDirect(): Boolean = true
 
+    // Плеер понимает auto_next=false: список серий есть, но по концу серии плеер закрывается
+    // (player.js шлёт плейлист и при выключенном «Переключать серии автоматически»)
+    @JavascriptInterface
+    fun playlistAutoNext(): Boolean = true
+
     // «Об устройстве» (app.js: setupAndroidAppSettings): что делает удержание «Назад» —
     // выход из приложения или меню приложения. Меню тогда открывается кнопкой рядом
     @JavascriptInterface

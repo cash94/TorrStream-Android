@@ -132,6 +132,9 @@ class InternalPlayerActivity : AppCompatActivity() {
         const val ONLINE_SUBS = "online_subs"
         // Base of the online-subtitles proxy (apiproxy.json: subsApi); absent — straight to the services
         const val ONLINE_SUBS_PROXY = "online_subs_proxy"
+        // «Переключать серии автоматически» веб-интерфейса. false — список серий в плеере есть,
+        // но по концу серии плеер закрывается, как после фильма. Нет extra — переключать.
+        const val AUTO_NEXT = "auto_next"
     }
 
     private data class SkipRange(val type: String, val startMs: Long, val endMs: Long) {
@@ -424,6 +427,10 @@ class InternalPlayerActivity : AppCompatActivity() {
     private var lastPosition = 0L
     private var lastDuration = 0L
     private var endedByCompletion = false
+
+    /** Конец серии — следующая серия ([Extras.AUTO_NEXT]); иначе плеер закрывается. */
+    private val autoNext: Boolean
+        get() = intent.getBooleanExtra(Extras.AUTO_NEXT, true)
     private var resultDelivered = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1488,6 +1495,18 @@ class InternalPlayerActivity : AppCompatActivity() {
                     if (event.repeatCount > 0 && seekBar.hasFocus()) return true
                 }
 
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    // Горячие клавиши: при скрытой панели влево/вправо сразу перематывают.
+                    // Панель открывается на полосе, и это же нажатие уходит в неё — дальше
+                    // как обычно: удержание ускоряет, перемотка по отпусканию
+                    if (!controlsVisible && !skipButtonFocused) {
+                        showControls()
+                        seekBar.requestFocus()
+                        seekKeyHeld = true
+                        return super.dispatchKeyEvent(event)
+                    }
+                }
+
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                     // Let OK reach the skip button when it is the thing holding focus,
                     // instead of merely summoning the control bar.
@@ -1722,7 +1741,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         val p = player ?: return
         if (range.type == TYPE_INTRO) {
             p.seekTo(range.endMs)
-        } else if (p.hasNextMediaItem()) {
+        } else if (autoNext && p.hasNextMediaItem()) {
             p.seekToNextMediaItem()
         } else {
             endedByCompletion = true
@@ -2574,6 +2593,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         subtitleIndex = intent.getIntExtra(Extras.PLAYLIST_INDEX, 0),
         audioMode = audioMode,
         subtitleScale = Prefs.PLAYER_SUBTITLE_SCALES[playerSubtitleSize],
+        autoAdvance = autoNext,
     )
 
     private fun buildExoPlayer(headers: Map<String, String>): Player {
@@ -2599,6 +2619,9 @@ class InternalPlayerActivity : AppCompatActivity() {
             )
             .build()
             .also { exo ->
+                // Без автопереключения серий ExoPlayer встаёт в конце серии, а не уходит на
+                // следующую: плеер закроется на ней же (onPlayWhenReadyChanged)
+                exo.pauseAtEndOfMediaItems = !autoNext
                 ass.attach(exo) { handler.post { restartPlayer("ASS in the preloaded item") } }
                 assSubtitles = ass
             }
@@ -2722,11 +2745,22 @@ class InternalPlayerActivity : AppCompatActivity() {
             if (playbackState == Player.STATE_ENDED) {
                 val p = player ?: return
                 // Only a finished *last* item counts as "watched to the end"; finishing an episode
-                // mid-playlist just rolls on to the next one.
-                if (!p.hasNextMediaItem()) {
+                // mid-playlist just rolls on to the next one — unless auto-advance is off.
+                if (!p.hasNextMediaItem() || !autoNext) {
                     endedByCompletion = true
                     finish()
                 }
+            }
+        }
+
+        // Автопереключение серий выключено: ExoPlayer встал в конце серии
+        // (pauseAtEndOfMediaItems) — серия досмотрена, выходим, как после фильма
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (!playWhenReady && !autoNext &&
+                reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM
+            ) {
+                endedByCompletion = true
+                finish()
             }
         }
 

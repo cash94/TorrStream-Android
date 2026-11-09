@@ -2648,7 +2648,12 @@ class MainActivity : BaseActivity(),
                 // Create new state
                 val playlist = try {
                     when {
-                        jsonObject.has("playlist") && playerAutoNext ->
+                        // auto_next=false (веб: «Переключать серии автоматически» выключено):
+                        // встроенный плеер список серий получает, но сам их не листает;
+                        // внешним этого не сказать — им одна серия
+                        jsonObject.has("playlist") && playerAutoNext &&
+                                (jsonObject.optBoolean("auto_next", true) ||
+                                        selectedPlayer.equals(INTERNAL_PLAYER, true)) ->
                             playerStateManager.convertJsonToPlaylist(jsonObject.getJSONArray("playlist"))
 
                         else -> listOf(playerStateManager.convertJsonToPlaylistItem(jsonObject))
@@ -2804,6 +2809,7 @@ class MainActivity : BaseActivity(),
             setDataAndType(currentItem.url.toUri(), "video/*")
             putExtra(InternalPlayerActivity.Extras.TITLE, videoTitle)
             headers?.let { putExtra(InternalPlayerActivity.Extras.HEADERS, it) }
+            putExtra(InternalPlayerActivity.Extras.AUTO_NEXT, jsonObject.optBoolean("auto_next", true))
 
             when {
                 playerTimeCode == "continue" -> putExtra(

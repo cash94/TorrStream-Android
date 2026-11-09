@@ -56,6 +56,8 @@ class VlcPlayer(
     audioMode: Int = Prefs.AUDIO_PCM,
     /** Размер субтитров — множитель к обычному (Prefs.PLAYER_SUBTITLE_SCALES). */
     subtitleScale: Float = 1f,
+    /** Конец серии — следующая. false — остановиться (STATE_ENDED), как pauseAtEndOfMediaItems. */
+    private val autoAdvance: Boolean = true,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
 
     /**
@@ -398,7 +400,7 @@ class VlcPlayer(
 
     private fun onEnded() {
         pendingSeekMs = null
-        if (index < items.size - 1) {
+        if (autoAdvance && index < items.size - 1) {
             // Следующая серия — как автопереход ExoPlayer
             index++
             startPositionMs = 0
