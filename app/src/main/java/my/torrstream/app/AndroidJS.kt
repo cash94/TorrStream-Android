@@ -188,7 +188,10 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     // Все вызовы мгновенные: скачивание, запуск и проверка порта идут в фоне, а веб
     // опрашивает tsLocalStatus.
 
-    /** JSON: установлен ли, версия, идёт ли загрузка, отвечает ли порт 8090 и чей там сервер */
+    /**
+     * JSON: установлен ли, версия, идёт ли загрузка, отвечает ли порт 8090 и чей там сервер;
+     * url и server — адрес сервера на устройстве и что там: MonoServer (8099) или TorrServer
+     */
     @JavascriptInterface
     fun tsLocalStatus(): String = TorrServerManager.statusJson()
 
@@ -196,9 +199,9 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     @JavascriptInterface
     fun tsLocalInstall() = TorrServerManager.installAsync(startAfter = true)
 
-    /** Запустить свою копию, если порт 8090 свободен */
+    /** Запустить: MonoServer, если он установлен (открыть его приложение), иначе свою копию на 8090 */
     @JavascriptInterface
-    fun tsLocalStart() = TorrServerManager.startIfFree()
+    fun tsLocalStart() = TorrServerManager.start()
 
     @JavascriptInterface
     fun tsLocalStop() = TorrServerManager.stop()

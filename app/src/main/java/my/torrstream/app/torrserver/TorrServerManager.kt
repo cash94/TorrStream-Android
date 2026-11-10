@@ -1,6 +1,7 @@
 package my.torrstream.app.torrserver
 
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.util.Log
 import androidx.core.content.edit
@@ -30,14 +31,25 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Свою копию не запускаем, если порт 8090 уже отвечает: у пользователя может работать
  * TorrServe или другой TorrServer — две копии на одном порту не уживутся.
+ *
+ * MonoServer (TorrServer на C#, отдельное приложение online.torrstream.monoserver из
+ * github.com/cash94/MonoServer) на Android слушает 8099, чтобы не мешать TorrServer на
+ * 8090. Отличаем его по GET /api/info ({"name":"MonoServer", …}; у TorrServer такого
+ * нет). Работает MonoServer — «TorrServer на этом устройстве» указывает на него
+ * (адрес — поле url статуса), свою копию тогда не запускаем.
  */
 object TorrServerManager {
     private const val TAG = "TorrServer"
     const val PORT = 8090
+    /** Порт MonoServer для Android (online.torrstream.monoserver: Env.DEFAULT_PORT) */
+    const val MONO_PORT = 8099
+    const val MONO_PACKAGE = "online.torrstream.monoserver"
     private const val RELEASES = "https://api.github.com/repos/YouROK/TorrServer/releases/latest"
     private const val PREFS = "torrserver"
     private const val PREF_VERSION = "version"
     private const val PREF_AUTOSTART = "autostart"
+    /** Порт сервера, который отвечал последним, — чтобы адрес не скакал, пока все молчат */
+    private const val PREF_ACTIVE_PORT = "active_port"
     /** Статус порта старше этого — перепроверяем при следующем запросе статуса */
     private const val CHECK_TTL_MS = 2000L
 
@@ -67,6 +79,9 @@ object TorrServerManager {
     @Volatile var progress = 0; private set
     @Volatile var error: String? = null; private set
     @Volatile var portVersion: String? = null; private set   // ответ /echo, null — порт молчит
+    @Volatile var monoVersion: String? = null; private set   // версия MonoServer на 8099, null — молчит
+    @Volatile private var monoStartingAt = 0L                 // когда открыли приложение MonoServer
+    private val monoStarting get() = monoStartingAt != 0L && System.currentTimeMillis() - monoStartingAt < 20_000
     @Volatile private var portCheckedAt = 0L
     @Volatile var latestVersion: String? = null; private set
     private val checking = AtomicBoolean(false)
@@ -92,6 +107,29 @@ object TorrServerManager {
     /** Работает ли TorrServer, запущенный нами (а не чужой на том же порту) */
     val isOwnRunning: Boolean get() = TorrServerService.isProcessAlive
 
+    /** Установлено ли приложение MonoServer (targetSdk 28 — видимость пакетов не ограничена) */
+    val isMonoInstalled: Boolean
+        get() = try {
+            App.context.packageManager.getPackageInfo(MONO_PACKAGE, 0)
+            true
+        } catch (e: Exception) {
+            false
+        }
+
+    /**
+     * Порт сервера для «TorrServer на этом устройстве»: свой — 8090; иначе MonoServer
+     * на 8099, если отвечает; иначе тот, кто на 8090. Не отвечает никто — последний
+     * отвечавший (без него — 8099, если MonoServer установлен).
+     */
+    private val activePort: Int
+        get() = when {
+            isOwnRunning -> PORT
+            monoVersion != null || monoStarting -> MONO_PORT
+            portVersion != null -> PORT
+            else -> prefs.getInt(PREF_ACTIVE_PORT, 0).takeIf { it == PORT || it == MONO_PORT }
+                ?: if (isMonoInstalled) MONO_PORT else PORT
+        }
+
     // ==================== СТАТУС ====================
 
     /**
@@ -100,6 +138,17 @@ object TorrServerManager {
      */
     fun statusJson(): String {
         if (System.currentTimeMillis() - portCheckedAt > CHECK_TTL_MS) refreshPortAsync()
+        val port = activePort
+        val monoInstalled = isMonoInstalled
+        // Что отвечает по адресу url: MonoServer на 8099 или на 8090 (порт сменили в его
+        // настройках — тогда его выдаёт /echo «MatriX… (MonoServer x)»), иначе TorrServer
+        val echoMono = portVersion?.let { MONO_ECHO.find(it)?.groupValues?.get(1) }
+        val server = when {
+            port == MONO_PORT -> "monoserver"
+            echoMono != null && !isOwnRunning -> "monoserver"
+            else -> "torrserver"
+        }
+        val runningVersion = if (port == MONO_PORT) monoVersion else (echoMono ?: portVersion)
         return JSONObject().apply {
             put("supported", assetSuffix != null)
             put("installed", isInstalled)
@@ -108,11 +157,15 @@ object TorrServerManager {
             put("downloading", downloading)
             put("progress", progress)
             put("error", error ?: JSONObject.NULL)
-            put("running", portVersion != null)
-            put("runningVersion", portVersion ?: JSONObject.NULL)
-            put("own", isOwnRunning)
+            put("running", runningVersion != null)
+            put("runningVersion", runningVersion ?: JSONObject.NULL)
+            put("own", isOwnRunning && port == PORT)
             put("autostart", autostart)
-            put("port", PORT)
+            put("port", port)
+            put("url", "http://localhost:$port")
+            put("server", server)
+            put("monoInstalled", monoInstalled)
+            put("starting", monoStarting && monoVersion == null)
         }.toString()
     }
 
@@ -123,7 +176,10 @@ object TorrServerManager {
         }
     }
 
-    /** Ответ /echo на localhost:8090 — версия работающего TorrServer или null */
+    /**
+     * Ответ /echo на localhost:8090 — версия работающего TorrServer или null.
+     * Заодно — работает ли MonoServer на 8099 (monoVersion).
+     */
     fun checkPort(): String? {
         val version = try {
             probeClient.newCall(Request.Builder().url("http://127.0.0.1:$PORT/echo").build())
@@ -134,9 +190,30 @@ object TorrServerManager {
             null
         }
         portVersion = version
+        monoVersion = checkMono()
+        if (isOwnRunning || monoVersion != null || version != null) {
+            val port = activePort
+            if (prefs.getInt(PREF_ACTIVE_PORT, 0) != port) prefs.edit { putInt(PREF_ACTIVE_PORT, port) }
+        }
         portCheckedAt = System.currentTimeMillis()
         return version
     }
+
+    /** Версия MonoServer на localhost:8099 по GET /api/info или null (молчит или это не он) */
+    private fun checkMono(): String? = try {
+        probeClient.newCall(Request.Builder().url("http://127.0.0.1:$MONO_PORT/api/info").build())
+            .execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val info = JSONObject(resp.body()?.string() ?: return@use null)
+                if (info.optString("name") != "MonoServer") null
+                else info.optString("version").ifEmpty { "?" }
+            }
+    } catch (e: Exception) {
+        null   // IOException — порт молчит, JSONException — там не MonoServer
+    }
+
+    /** Версия из /echo MonoServer: «MatriX.136 (MonoServer 1.0.35)» */
+    private val MONO_ECHO = Regex("""\(MonoServer ([^)]+)\)""")
 
     // ==================== УСТАНОВКА ====================
 
@@ -230,8 +307,8 @@ object TorrServerManager {
             if (!isInstalled) { error = "TorrServer не установлен"; return@launch }
             autostart = true
             if (isOwnRunning) return@launch
-            if (checkPort() != null) {
-                Log.i(TAG, "Порт $PORT уже занят ($portVersion) — свою копию не запускаем")
+            if (checkPort() != null || monoVersion != null) {
+                Log.i(TAG, "Уже работает ${portVersion ?: "MonoServer $monoVersion"} — свою копию не запускаем")
                 return@launch
             }
             TorrServerService.start(App.context)
@@ -242,6 +319,41 @@ object TorrServerManager {
             }
             if (!isOwnRunning) error = "TorrServer не запустился — см. журнал"
         }
+    }
+
+    /**
+     * Кнопка «Запустить»: стоит MonoServer — открываем его приложение (сервер он поднимает
+     * при открытии, если в нём не выключено «запускать сервер при открытии»; его служба
+     * снаружи недоступна), иначе — свою копию.
+     */
+    fun start() {
+        if (isMonoInstalled && monoVersion == null && !isOwnRunning) {
+            scope.launch {
+                error = null
+                if (checkPort() != null || monoVersion != null) return@launch
+                val intent = App.context.packageManager.getLaunchIntentForPackage(MONO_PACKAGE)
+                if (intent == null) { error = "MonoServer не открывается"; return@launch }
+                try {
+                    App.context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (e: Exception) {
+                    error = e.message ?: "MonoServer не открывается"
+                    return@launch
+                }
+                monoStartingAt = System.currentTimeMillis()
+                try {
+                    repeat(15) {
+                        delay(1000)
+                        checkPort()
+                        if (monoVersion != null) return@launch
+                    }
+                    error = "MonoServer не ответил на порту $MONO_PORT — запустите сервер в его приложении"
+                } finally {
+                    monoStartingAt = 0L
+                }
+            }
+            return
+        }
+        startIfFree()
     }
 
     fun stop() {
@@ -255,7 +367,8 @@ object TorrServerManager {
 
     /** Запуск приложения: подняли сервер в прошлый раз — поднимаем снова */
     fun autostartIfNeeded() {
-        if (autostart && isInstalled) startIfFree()
+        // MonoServer поднимается сам (его автозапуск), своя копия рядом не нужна
+        if (autostart && isInstalled && !isMonoInstalled) startIfFree()
     }
 
     fun deleteBinary() {
