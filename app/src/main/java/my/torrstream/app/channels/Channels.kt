@@ -62,12 +62,17 @@ object Channels {
     private const val ITEMS_PER_CHANNEL = 30
     private const val REFRESH_INTERVAL_MS = 3 * 60 * 60 * 1000L // сервер обновляет подборки раз в сутки
     private const val POSTER_SIZE = "w342"
+    /** Кадр фильма для широких плиток Google TV: его ряд — плитки 16:9, постер 2:3 там растянут. */
+    private const val BACKDROP_SIZE = "w780"
 
     /** Зеркала постеров, если сервер не ответил, — как DEFAULTS.tmdbImages в api-proxy.js. */
     private val DEFAULT_IMAGE_HOSTS = listOf("tsimg.torrstream.online", "nl.imagetmdb.com", "mocha.stull.xyz")
 
     private const val PREF_UPDATED_AT = "updated_at"
     private const val PREF_SERVER = "server"
+    /** Вид карточек: сменился (широкие кадры Google TV) — каналы пересобираются сразу, не через 3 ч. */
+    private const val PREF_LAYOUT = "layout"
+    private const val LAYOUT = 2
     private const val PREF_DISABLED = "disabled"
     private const val PREF_GTV_KEYS = "gtv_keys"
     private const val PREF_TS_CLIENT_ID = "ts_client_id"
@@ -135,7 +140,7 @@ object Channels {
     /** Этот канал система делает видимым без вопроса пользователю. */
     private val DEFAULT_KEY = DEFS.first().key
 
-    private class Card(
+    private data class Card(
         val id: String,
         val mediaType: String,
         val title: String,
@@ -148,8 +153,13 @@ object Channels {
         val hash: String? = null,
         /** id TMDB раздачи, если веб его сохранил, — запасной путь, если раздачу удалят. */
         val tmdbId: String? = null,
+        /** Широкий кадр (backdrop) — для плиток 16:9 Google TV. */
+        val backdrop: String? = null,
     ) {
-        fun withCategory(name: String) = Card(id, mediaType, title, poster, overview, year, name, hash, tmdbId)
+        fun withCategory(name: String) = copy(category = name)
+
+        /** id TMDB, по которому можно спросить кадр у сервера: у раздачи — сохранённый вебом. */
+        val tmdbKey: String? get() = (if (hash != null) tmdbId else id)?.takeIf { it.toLongOrNull() != null }
     }
 
     private val prefs get() = App.context.getSharedPreferences("tv_channels", MODE_PRIVATE)
@@ -226,16 +236,36 @@ object Channels {
         val cards = mutableListOf<Card>()
         for (i in 0 until perCategory) picked.forEach { list -> list.getOrNull(i)?.let { cards += it } }
         if (cards.isEmpty()) return 0
+        val wide = withBackdrops(server, cards, images)
 
         val defaultDef = DEFS.first { it.key == DEFAULT_KEY }
         val channelId = published[DEFAULT_KEY] ?: createChannel(defaultDef) ?: return 0
         renameChannel(channelId, if (mixed) MIXED_CHANNEL_NAME else defs.first().name)
-        syncPrograms(channelId, defaultDef, cards)
+        syncPrograms(channelId, defaultDef, wide, wide = true)
 
         // Остальные каналы Google TV не показывает — незачем их и обновлять
         published.filterKeys { it != DEFAULT_KEY }.values.forEach { deleteChannel(it) }
         return 1
     }
+
+    /**
+     * Кадры для карточек, у которых их нет: каталоги сервера и раздачи отдают только постер.
+     * /api/tmdb/item сервер кэширует, а канал Google TV один — не больше [ITEMS_PER_CHANNEL]
+     * запросов раз в [REFRESH_INTERVAL_MS]. Без кадра карточка остаётся с постером.
+     */
+    private fun withBackdrops(server: String, cards: List<Card>, images: PosterMirror.Resolver): List<Card> =
+        cards.map { card ->
+            if (card.backdrop != null) return@map card
+            val tmdbId = card.tmdbKey ?: return@map card
+            val type = if (card.mediaType == "tv") "tv" else "movie"
+            val path = try {
+                getJson("$server/api/tmdb/item?id=$tmdbId&type=$type")?.optString("backdrop_path")
+            } catch (e: Exception) {
+                Log.w(TAG, "Кадр $type:$tmdbId: $e")
+                null
+            }
+            images.url(path, BACKDROP_SIZE)?.let { card.copy(backdrop = it) } ?: card
+        }
 
     private fun renameChannel(channelId: Long, name: String) {
         try {
@@ -309,7 +339,8 @@ object Channels {
         val server = serverBase() ?: return false
         val now = System.currentTimeMillis()
         val fresh = now - prefs.getLong(PREF_UPDATED_AT, 0L) < REFRESH_INTERVAL_MS &&
-                prefs.getString(PREF_SERVER, null) == server
+                prefs.getString(PREF_SERVER, null) == server &&
+                prefs.getInt(PREF_LAYOUT, 1) == LAYOUT
         val images = PosterMirror.Resolver { fetchImageHosts(server) }
         // Подборки сервер обновляет раз в сутки, а раздачи добавляют когда угодно: в
         // промежутках между полными обновлениями — только «Мои торренты»
@@ -328,6 +359,7 @@ object Channels {
                 if (ok > 0) prefs.edit {
                     putLong(PREF_UPDATED_AT, now)
                     putString(PREF_SERVER, server)
+                    putInt(PREF_LAYOUT, LAYOUT)
                 }
                 Log.i(TAG, "Google TV: общий канал ${if (ok > 0) "обновлён" else "не обновлён"}")
                 return ok > 0
@@ -348,6 +380,7 @@ object Channels {
             if (ok > 0) prefs.edit {
                 putLong(PREF_UPDATED_AT, now)
                 putString(PREF_SERVER, server)
+                putInt(PREF_LAYOUT, LAYOUT)
             }
             Log.i(TAG, "Каналы обновлены: $ok из ${DEFS.size}")
             return ok > 0
@@ -476,7 +509,7 @@ object Channels {
      * новые добавляет, лишние удаляет. Полная пересборка заставила бы лаунчер мигать рядом.
      */
     @SuppressLint("RestrictedApi")
-    private fun syncPrograms(channelId: Long, def: Def, cards: List<Card>) {
+    private fun syncPrograms(channelId: Long, def: Def, cards: List<Card>, wide: Boolean = false) {
         val resolver = App.context.contentResolver
         val existing = mutableMapOf<String, Long>()
         resolver.query(
@@ -495,6 +528,8 @@ object Channels {
         cards.forEachIndexed { index, card ->
             val pid = "${def.key}:${card.mediaType}:${card.id}"
             if (!seen.add(pid)) return@forEachIndexed
+            // Google TV рисует ряд плитками 16:9 и растягивает в них постер: туда — кадр
+            val backdrop = card.backdrop?.takeIf { wide }
             val builder = PreviewProgram.Builder()
                 .setChannelId(channelId)
                 .setType(
@@ -502,8 +537,11 @@ object Channels {
                     else TvContractCompat.PreviewPrograms.TYPE_MOVIE
                 )
                 .setTitle(card.title)
-                .setPosterArtUri(Uri.parse(card.poster))
-                .setPosterArtAspectRatio(TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3)
+                .setPosterArtUri(Uri.parse(backdrop ?: card.poster))
+                .setPosterArtAspectRatio(
+                    if (backdrop != null) TvContractCompat.PreviewPrograms.ASPECT_RATIO_16_9
+                    else TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3
+                )
                 .setInternalProviderId(pid)
                 .setWeight(cards.size - index) // лаунчер ставит левее карточку с большим весом
                 .setIntentUri(Uri.parse(cardIntent(card).toUri(Intent.URI_INTENT_SCHEME)))
@@ -708,6 +746,8 @@ object Channels {
                 year = Regex("(19|20)\\d{2}").find(title)?.value,
                 hash = hash,
                 tmdbId = movie?.opt("id")?.toString()?.takeIf { it.toLongOrNull() != null },
+                backdrop = listOf(movie?.optString("background_image"), movie?.optString("backdrop_path"))
+                    .firstNotNullOfOrNull { images.url(it, BACKDROP_SIZE) },
             )
         }
         return cards
@@ -732,6 +772,7 @@ object Channels {
                 poster = poster,
                 overview = item.optString("overview").takeIf { it.isNotBlank() },
                 year = Regex("(19|20)\\d{2}").find(date)?.value,
+                backdrop = images.url(item.optString("backdrop_path"), BACKDROP_SIZE),
             )
         }
         return cards

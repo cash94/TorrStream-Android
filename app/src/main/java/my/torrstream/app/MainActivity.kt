@@ -116,6 +116,7 @@ import my.torrstream.app.helpers.isSafeForUse
 import my.torrstream.app.helpers.isTvBox
 import my.torrstream.app.models.LAMPA_CARD_KEY
 import my.torrstream.app.models.LampaCard
+import my.torrstream.app.tmdb.TMDB
 import my.torrstream.app.net.HttpHelper
 import my.torrstream.app.player.InternalPlayerActivity
 import my.torrstream.app.sched.Scheduler
@@ -179,6 +180,7 @@ class MainActivity : BaseActivity(),
     companion object {
         // Constants
         const val VIDEO_COMPLETED_DURATION_MAX_PERCENTAGE = 96
+        private const val EXTRA_TITLE_BASE = "title_base"
         private const val TAG = "APP_MAIN"
         private const val RESULT_VIMU_ENDED = 2
         private const val RESULT_VIMU_START = 3
@@ -746,6 +748,9 @@ class MainActivity : BaseActivity(),
 
         data?.let { intent ->
             when (intent.action) {
+                // Just+ Player Playlist API
+                "com.justplus.player.result" ->
+                    handleJustPlusPlayerResult(intent, resultCode, videoUrl)
                 // MX & Just Player
                 "com.mxtech.intent.result.VIEW" ->
                     handleMxPlayerResult(intent, resultCode, videoUrl)
@@ -2672,6 +2677,9 @@ class MainActivity : BaseActivity(),
                     activity?.let { put("lampaActivity", it) }
                     // Store headers as raw string array to extras
                     headers?.let { put("headers_array", it.asList()) }
+                    // Series name without the episode, for players that show the episode themselves
+                    jsonObject.optString("title_base").takeIf { it.isNotBlank() }
+                        ?.let { put(EXTRA_TITLE_BASE, it) }
                 }
                 // save new state
                 playerStateManager.saveState(
@@ -3295,6 +3303,10 @@ class MainActivity : BaseActivity(),
         return label.filter { it.isDigit() }.toIntOrNull() ?: 0
     }
 
+    // Just+ Player Playlist API (2.1.1+, the only playlist format since 2.6.3 — `video_list` is no
+    // longer read): https://github.com/just-plus-player/just-plus-player/blob/master/docs/PLAYLIST_API.md
+    // Everything goes in one `playlist` Bundle; the flat single-video extras (title, position in
+    // ms, headers, return_result) stay for older builds and forks that only know the MX-style launch.
     private fun configureJustPlusPlayerIntent(
         intent: Intent,
         playerPackage: String,
@@ -3306,117 +3318,122 @@ class MainActivity : BaseActivity(),
         val card = (state.extras[LAMPA_CARD_KEY] as? String)
             ?.let { getJson(it, LampaCard::class.java) }
         val cardImdbId = card?.imdb_id?.takeIf { it.isNotEmpty() }
-        val cardId = card?.id?.takeIf { it.isNotEmpty() }
+        // TMDB id only: CUB/KP cards carry "KP_123" or UUIDs there, which would mislead the player.
+        val cardTmdbId = card?.id?.takeIf { id -> id.isNotEmpty() && id.all { it.isDigit() } }
+        // Just+ adds "Season N · Episode N" itself: the web's title_base minus its " · Сезон N"
+        val seriesTitle = (state.extras[EXTRA_TITLE_BASE] as? String)
+            ?.replace(Regex("""\s*·\s*Сезон\s+\d+\s*$"""), "")
+            ?.takeIf { it.isNotBlank() }
+            ?: (card?.name ?: card?.title)?.takeIf { it.isNotBlank() } ?: videoTitle
+        val background = card?.background_image?.takeIf { it.startsWith("http") }
+            ?: card?.backdrop_path?.takeIf { it.isNotEmpty() }
+                ?.let { TMDB.imageUrl(it).replace("original", "w1280") }
+                ?.takeIf { it.startsWith("http") }
+
+        val startIndex = state.currentIndex.coerceIn(0, (state.playlist.size - 1).coerceAtLeast(0))
+        val items = state.playlist.mapIndexed { index, item ->
+            Bundle().apply {
+                putString("uri", item.url)
+                if (state.playlist.size == 1) putString("title", videoTitle)
+                (item.episodeTitle ?: item.title)?.takeIf { it.isNotBlank() && it != seriesTitle }
+                    ?.let { putString("episode_title", it) }
+                item.thumbnail?.takeIf { it.startsWith("http") }?.let { putString("thumbnail", it) }
+                (item.imdbId ?: cardImdbId)?.let { putString("imdb_id", it) }
+                cardTmdbId?.let { putString("tmdb_id", it) }
+                item.season?.let { putInt("season", it) }
+                item.episode?.let { putInt("episode", it) }
+                item.segments?.takeIf { it.isNotBlank() }?.let { putString("segments", it) }
+
+                // Where the item starts: the start item from the resume choice, the others (a jump
+                // from the player's episode list) from their own unfinished timeline.
+                val startMs = when {
+                    playerTimeCode != "continue" -> 0L
+                    index == startIndex -> position
+                    else -> item.timeline
+                        ?.takeIf { it.percent in 1 until VIDEO_COMPLETED_DURATION_MAX_PERCENTAGE }
+                        ?.let { (it.time * 1000).toLong() } ?: 0L
+                }
+                if (startMs > 0) putInt("position_sec", (startMs / 1000).toInt())
+
+                item.quality?.filterValues { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }?.let { q ->
+                    val labels = q.keys.sortedByDescending { qualityLines(it) }
+                    putParcelableArray("qualities", labels.map { label ->
+                        Bundle().apply {
+                            putString("label", label)
+                            putString("uri", q.getValue(label))
+                            if (q.getValue(label) == item.url) putBoolean("selected", true)
+                        }
+                    }.toTypedArray())
+                }
+
+                item.subtitles?.filter { it.url.isNotEmpty() }?.takeIf { it.isNotEmpty() }?.let { subs ->
+                    putParcelableArray("subtitles", subs.map { sub ->
+                        Bundle().apply {
+                            putString("uri", sub.url)
+                            sub.label.takeIf { it.isNotBlank() }?.let { putString("label", it) }
+                            sub.language?.takeIf { it.isNotBlank() }?.let { putString("language", it) }
+                        }
+                    }.toTypedArray())
+                }
+            }
+        }
+
+        val playlist = Bundle().apply {
+            putString("title", seriesTitle)
+            background?.let { putString("background", it) }
+            putInt("start_index", startIndex)
+            headers?.let { putStringArray("headers", it) }
+            // The resume choice is ours (playerTimeCode): never ask again in the player.
+            putBoolean("ask_resume", false)
+            putParcelableArray("items", items.toTypedArray())
+        }
 
         intent.apply {
             setPackage(playerPackage)
+            state.playlist.getOrNull(startIndex)?.let { setDataAndType(it.url.toUri(), "video/*") }
+            putExtra("playlist", playlist)
+
+            // Legacy single-video launch (before 2.1.1 / forks)
             putExtra("title", videoTitle)
             putExtra("return_result", true)
-
             headers?.let { putExtra("headers", it) }
-
             when {
-                playerTimeCode == "continue" && position > 0 ->
-                    putExtra("position", position.toInt())
-                playerTimeCode == "again" ->
-                    putExtra("position", 0)
+                playerTimeCode == "continue" && position > 0 -> putExtra("position", position.toInt())
+                playerTimeCode == "again" -> putExtra("position", 0)
             }
+        }
+    }
 
-            // Quality variants for the current item (JAPP quality-switching contract): parallel
-            // String[] arrays aligned by index, sorted from highest resolution to lowest. Absent
-            // when the item carries no quality map.
-            state.currentItem?.quality?.takeIf { it.isNotEmpty() }?.let { qualities ->
-                val labels = qualities.keys.sortedByDescending { qualityLines(it) }
-                putExtra("quality_levels", labels.toTypedArray())
-                putExtra("quality_urls", labels.map { qualities.getValue(it).toUri() }.toTypedArray())
+    private fun handleJustPlusPlayerResult(intent: Intent, resultCode: Int, videoUrl: String) {
+        if (resultCode != RESULT_OK) {
+            Log.i(TAG, "Just+: no result [resultCode=$resultCode]")
+            return
+        }
+        val endBy = intent.getStringExtra("end_by")
+        val index = intent.getIntExtra("index", -1)
+        if (index < 0) {
+            // Refused request or closed before anything played
+            Log.e(TAG, "Just+: nothing played [endBy=$endBy, error=${intent.getStringExtra("error_message")}]")
+            return
+        }
+        intent.getStringArrayExtra("warnings")?.forEach { Log.w(TAG, "Just+ dropped: $it") }
+
+        val pos = intent.getLongExtra("position_ms", intent.getIntExtra("position_sec", 0) * 1000L)
+        val dur = intent.getLongExtra("duration_ms", intent.getIntExtra("duration_sec", 0) * 1000L)
+        // The result URI may be a quality variant; resultPlayer matches those to the item too.
+        val url = intent.getStringExtra("uri") ?: videoUrl
+
+        when {
+            endBy == "completion" -> {
+                Log.i(TAG, "Just+: playlist completed [index=$index]")
+                resultPlayer(url, pos.toInt(), dur.toInt(), true)
             }
-
-            if (state.playlist.size > 1) {
-                val urls = ArrayList<Uri>()
-                val titles = ArrayList<String>()
-                val filenames = ArrayList<String>()
-                val thumbnails = ArrayList<String>()
-                val segmentsList = ArrayList<String>()
-                val subtitlesList = ArrayList<Bundle>()
-
-                val seasons = ArrayList<String>()
-                val episodes = ArrayList<String>()
-                val imdbIds = ArrayList<String>()
-                val ids = ArrayList<String>()
-
-                state.playlist.forEachIndexed { index, item ->
-                    urls.add(item.url.toUri())
-                    titles.add(item.title ?: "")
-                    filenames.add(item.url.toUri().lastPathSegment ?: "")
-                    thumbnails.add(item.thumbnail ?: "")
-                    segmentsList.add(item.segments ?: "")
-                    seasons.add(item.season?.toString() ?: "")
-                    episodes.add(item.episode?.toString() ?: "")
-                    imdbIds.add(item.imdbId ?: cardImdbId ?: "")
-                    ids.add(cardId ?: "")
-
-                    // Per-episode quality variants, keyed by index (mirrors the uri_$index pattern).
-                    // Episodes without a quality map simply get no extras; the player falls back to url.
-                    item.quality?.takeIf { it.isNotEmpty() }?.let { q ->
-                        val labels = q.keys.sortedByDescending { qualityLines(it) }
-                        putExtra("video_list.quality_levels.$index", labels.toTypedArray())
-                        putExtra(
-                            "video_list.quality_urls.$index",
-                            labels.map { q.getValue(it).toUri() }.toTypedArray()
-                        )
-                    }
-
-                    val itemSubsBundle = Bundle()
-                    item.subtitles?.takeIf { it.isNotEmpty() }?.let { subs ->
-                        val subUris = subs.map { it.url.toUri() }.toTypedArray()
-                        val subNames = subs.map { it.label ?: "Sub" }.toTypedArray()
-                        itemSubsBundle.putParcelableArray("uris", subUris)
-                        itemSubsBundle.putStringArray("names", subNames)
-                    }
-                    subtitlesList.add(itemSubsBundle)
-                }
-
-                state.currentItem?.let { item ->
-                    setDataAndType(item.url.toUri(), "video/*")
-
-                    item.season?.let { putExtra("season", it) }
-                    item.episode?.let { putExtra("episode", it) }
-                    (item.imdbId ?: cardImdbId)?.let { putExtra("imdb_id", it) }
-                    cardId?.let { putExtra("id", it) }
-                }
-
-                putExtra("video_list", urls.toTypedArray())
-                putStringArrayListExtra("video_list.name", titles)
-                putStringArrayListExtra("video_list.filename", filenames)
-                putStringArrayListExtra("video_list.thumbnail", thumbnails)
-                putStringArrayListExtra("video_list.segments", segmentsList)
-                putStringArrayListExtra("video_list.season", seasons)
-                putStringArrayListExtra("video_list.episode", episodes)
-                putStringArrayListExtra("video_list.imdb_id", imdbIds)
-                putStringArrayListExtra("video_list.id", ids)
-
-                putParcelableArrayListExtra("video_list.subtitles", subtitlesList)
-
-            } else {
-                state.currentItem?.let { item ->
-                    setDataAndType(item.url.toUri(), "video/*")
-                    putExtra("filename", item.url.toUri().lastPathSegment)
-                    putExtra("thumbnail", item.thumbnail ?: "")
-                    item.segments?.let { putExtra("segments", it) }
-                    item.season?.let { putExtra("season", it) }
-                    item.episode?.let { putExtra("episode", it) }
-                    (item.imdbId ?: cardImdbId)?.let { putExtra("imdb_id", it) }
-                    cardId?.let { putExtra("id", it) }
-
-                    item.subtitles?.takeIf { it.isNotEmpty() }?.let { subs ->
-                        val subUris = subs.map { it.url.toUri() }.toTypedArray()
-                        val subNames = subs.map { it.label ?: "Sub" }.toTypedArray()
-
-                        putExtra("subs", subUris)
-                        putExtra("subs.name", subNames)
-                    }
-                }
+            pos > 0 && dur > 0 -> {
+                val ended = pos >= dur || isAfterEndCreditsPosition(pos, dur)
+                Log.i(TAG, "Just+: stopped [index=$index, position=$pos, duration=$dur, ended=$ended]")
+                resultPlayer(url, pos.toInt(), dur.toInt(), ended)
             }
+            else -> Log.i(TAG, "Just+: stopped with no progress [endBy=$endBy]")
         }
     }
 
