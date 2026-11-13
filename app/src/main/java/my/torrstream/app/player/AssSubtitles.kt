@@ -153,8 +153,11 @@ class AssSubtitles(context: Context) {
             withAss(base.createExtractors(uri, responseHeaders))
 
         private fun withAss(extractors: Array<Extractor>): Array<Extractor> {
-            val mkv = if (item == currentItem) AssMatroskaExtractor(parsers, handler)
-            else MatroskaExtractor(preloadParsers)
+            // Повреждённое место в MKV — пропустить до следующего кластера (MatroskaResyncExtractor)
+            val mkv = MatroskaResyncExtractor(
+                if (item == currentItem) AssMatroskaExtractor(parsers, handler)
+                else MatroskaExtractor(preloadParsers)
+            )
             extractors.forEachIndexed { i, extractor ->
                 if (extractor is MatroskaExtractor) extractors[i] = mkv
             }

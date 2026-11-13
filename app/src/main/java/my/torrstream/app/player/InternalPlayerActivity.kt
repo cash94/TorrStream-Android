@@ -73,6 +73,7 @@ import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlaybackException
+import androidx.media3.exoplayer.ExoTimeoutException
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
@@ -155,6 +156,10 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         /** Сколько раз за запуск плеер продолжает с того же места после порченых данных потока. */
         private const val MAX_STREAM_RESTARTS = 3
+
+        /** Сколько ждать, пока декодер отпустит картинку при сворачивании (по умолчанию 2 с). */
+        private const val DETACH_SURFACE_TIMEOUT_MS = 6_000L
+        private const val SURFACE_RESTART_DELAY_MS = 1_000L
         const val RESULT_ACTION = "my.torrstream.app.player.result.VIEW"
         const val END_BY_COMPLETION = "completion"
         const val END_BY_USER = "user"
@@ -2867,6 +2872,9 @@ class InternalPlayerActivity : AppCompatActivity() {
             )
             // How much of the stream is held in memory. LoadControl is fixed at build time, so
             // changing this setting rebuilds the player (see applyBufferSize).
+            // Сворачивание и выключение экрана: декодеры Amlogic и Tegra отпускают картинку
+            // дольше 2 с по умолчанию, и Media3 останавливала плеер ошибкой (см. onPlayerError)
+            .setDetachSurfaceTimeoutMs(DETACH_SURFACE_TIMEOUT_MS)
             .setLoadControl(
                 DefaultLoadControl.Builder()
                     .setTargetBufferBytes(playerBufferMb * 1024 * 1024)
@@ -3085,6 +3093,17 @@ class InternalPlayerActivity : AppCompatActivity() {
         override fun onPlayerError(error: PlaybackException) {
             Log.e(TAG, "Playback error: ${error.errorCodeName}", error)
 
+            // Картинку не отпустили вовремя — так бывает, когда приложение сворачивают или
+            // гасят экран (SHIELD, TCL). Это не сбой файла: свернули — onStop запомнит место
+            // и onStart соберёт плеер заново; остались на экране — пересобрать сейчас же
+            if (error.isSurfaceDetachTimeout()) {
+                Log.w(TAG, "Surface detach timed out, not a playback failure")
+                handler.postDelayed({
+                    if (!isFinishing && !stoppedInBackground) restartPlayer("surface detach timeout")
+                }, SURFACE_RESTART_DELAY_MS)
+                return
+            }
+
             // What "combined" is supposed to mean. ExoPlayer's own decoder fallback only
             // covers a decoder that fails to *initialise*; a decoder that starts and then chokes
             // partway through — which is how MPEG-4 in AVI tends to fail — never reached the
@@ -3199,6 +3218,18 @@ class InternalPlayerActivity : AppCompatActivity() {
          * MPEG-4 Part 2 (XviD/DivX). Программный декодер Android для него рассчитан максимум
          * на 352×288, так что откат на него ничего не даёт — сразу в libVLC.
          */
+        private fun PlaybackException.isSurfaceDetachTimeout(): Boolean {
+            if (errorCode != PlaybackException.ERROR_CODE_TIMEOUT) return false
+            var cause: Throwable? = this
+            while (cause != null) {
+                if (cause is ExoTimeoutException) {
+                    return cause.timeoutOperation == ExoTimeoutException.TIMEOUT_OPERATION_DETACH_SURFACE
+                }
+                cause = cause.cause
+            }
+            return false
+        }
+
         /**
          * Ошибка данных, а не сети и не декодера, — и уже посреди просмотра: файл открылся,
          * длительность известна, позиция ушла от начала.
