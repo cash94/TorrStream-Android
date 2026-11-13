@@ -73,6 +73,7 @@ import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlaybackException
+import androidx.media3.exoplayer.ExoTimeoutException
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
@@ -141,6 +142,9 @@ class InternalPlayerActivity : AppCompatActivity() {
         const val AUTO_NEXT = "auto_next"
         // POST-адрес отчётов о сбоях плеера (/api/diagnostics сервера), см. PlaybackDiagnostics
         const val DIAGNOSTICS_API = "diagnostics_api"
+        // «Автопропуск заставки и титров» веб-интерфейса: кнопка пропуска отсчитывает
+        // и пропускает сама, ОК — наоборот, отменяет. Нет extra — обычная кнопка
+        const val AUTO_SKIP = "auto_skip"
     }
 
     private data class SkipRange(val type: String, val startMs: Long, val endMs: Long) {
@@ -152,6 +156,10 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         /** Сколько раз за запуск плеер продолжает с того же места после порченых данных потока. */
         private const val MAX_STREAM_RESTARTS = 3
+
+        /** Сколько ждать, пока декодер отпустит картинку при сворачивании (по умолчанию 2 с). */
+        private const val DETACH_SURFACE_TIMEOUT_MS = 6_000L
+        private const val SURFACE_RESTART_DELAY_MS = 1_000L
         const val RESULT_ACTION = "my.torrstream.app.player.result.VIEW"
         const val END_BY_COMPLETION = "completion"
         const val END_BY_USER = "user"
@@ -159,6 +167,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val TYPE_INTRO = "intro"
         private const val TYPE_CREDITS = "credits"
         private const val SKIP_BUTTON_TIMEOUT_MS = 10_000L
+        /** Отсчёт автопропуска, секунд — как AUTO_SKIP_INTRO_SEC веб-плеера. */
+        private const val AUTO_SKIP_SEC = 5
         private const val STATS_INTERVAL_MS = 1_000L
         private val HASH_RE = Regex("^[0-9a-fA-F]{40}$")
         private const val SCREEN_SAVER_DELAY_MS = 15_000L
@@ -454,6 +464,10 @@ class InternalPlayerActivity : AppCompatActivity() {
     /** Конец серии — следующая серия ([Extras.AUTO_NEXT]); иначе плеер закрывается. */
     private val autoNext: Boolean
         get() = intent.getBooleanExtra(Extras.AUTO_NEXT, true)
+
+    /** Автопропуск заставки и титров ([Extras.AUTO_SKIP]). */
+    private val autoSkip: Boolean
+        get() = intent.getBooleanExtra(Extras.AUTO_SKIP, false)
     private var resultDelivered = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -615,7 +629,10 @@ class InternalPlayerActivity : AppCompatActivity() {
             }
         })
 
-        skipButton.setOnClickListener { executeSkip() }
+        skipButton.setOnClickListener {
+            // Идёт отсчёт автопропуска — нажатие значит «не пропускай, хочу посмотреть»
+            if (autoSkipLeft > 0) hideSkipButton() else executeSkip()
+        }
 
         // Touch: tapping the picture toggles the HUD, or dismisses the slide-out list.
         findViewById<View>(R.id.playerRoot).setOnClickListener {
@@ -1099,6 +1116,9 @@ class InternalPlayerActivity : AppCompatActivity() {
     private fun restartPlayer(what: String) {
         rememberResumePoint()
 
+        // Отсчёт автопропуска и автоскрытие кнопки живут на handler — без этого
+        // кнопка осталась бы висеть с замершим отсчётом
+        hideSkipButton()
         handler.removeCallbacksAndMessages(null)
         releasePlayer()
         try {
@@ -1640,6 +1660,58 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private val hideSkip = Runnable { hideSkipButton() }
 
+    /** Сколько секунд осталось до автопропуска; 0 — отсчёта нет. */
+    private var autoSkipLeft = 0
+
+    /**
+     * Тик отсчёта автопропуска. На паузе отсчёт стоит, как в веб-плеере: поставив
+     * на паузу в начале заставки, человек вернулся бы уже после неё.
+     */
+    private val autoSkipTick = object : Runnable {
+        override fun run() {
+            val range = activeSkipRange
+            if (range == null || autoSkipLeft <= 0) return
+            if (player?.isPlaying == true) {
+                autoSkipLeft--
+                if (autoSkipLeft <= 0) {
+                    Log.d(TAG, "Auto-skip: ${range.type}")
+                    executeSkip()
+                    return
+                }
+                skipButton.text = autoSkipLabel(range)
+                animateSkipProgress(autoSkipLeft.toFloat() / AUTO_SKIP_SEC, 1_000L)
+            }
+            handler.postDelayed(this, 1_000L)
+        }
+    }
+
+    /** Пропуск титров — это следующая серия, сам он идёт, только если она есть и автопереход включён. */
+    private fun shouldAutoSkip(range: SkipRange): Boolean {
+        if (!autoSkip) return false
+        return range.type == TYPE_INTRO ||
+                (range.type == TYPE_CREDITS && autoNext && player?.hasNextMediaItem() == true)
+    }
+
+    private fun autoSkipLabel(range: SkipRange): String = getString(
+        if (range.type == TYPE_INTRO) R.string.player_auto_skip_intro
+        else R.string.player_auto_skip_credits,
+        autoSkipLeft
+    )
+
+    private fun animateSkipProgress(to: Float, durationMs: Long) {
+        skipProgress.animate().cancel()
+        skipProgress.animate()
+            .scaleX(to)
+            .setDuration(durationMs)
+            .setInterpolator(LinearInterpolator())
+            .start()
+    }
+
+    private fun stopAutoSkip() {
+        handler.removeCallbacks(autoSkipTick)
+        autoSkipLeft = 0
+    }
+
     private val skipVisible: Boolean
         get() = skipContainer.visibility == View.VISIBLE
 
@@ -1744,32 +1816,39 @@ class InternalPlayerActivity : AppCompatActivity() {
     }
 
     private fun showSkipButton(range: SkipRange) {
+        stopAutoSkip()
         activeSkipRange = range
         offeredSkipKeys += range.key
-        skipButton.setText(
-            if (range.type == TYPE_INTRO) R.string.player_skip_intro
-            else R.string.player_skip_credits
-        )
         skipContainer.visibility = View.VISIBLE
         positionSkipButton()
         // The offer is short-lived, so it takes the remote: one OK press and it's done.
         skipButton.requestFocus()
-
-        // Bar drains left-to-right over exactly the window the offer stays up.
+        handler.removeCallbacks(hideSkip)
         skipProgress.animate().cancel()
         skipProgress.scaleX = 1f
-        skipProgress.animate()
-            .scaleX(0f)
-            .setDuration(SKIP_BUTTON_TIMEOUT_MS)
-            .setInterpolator(LinearInterpolator())
-            .start()
 
-        handler.removeCallbacks(hideSkip)
+        if (shouldAutoSkip(range)) {
+            // Своё время жизни у кнопки здесь — отсчёт; на паузе он стоит, так что
+            // десятисекундного автоскрытия нет. Полоска убывает по секундам отсчёта.
+            autoSkipLeft = AUTO_SKIP_SEC
+            skipButton.text = autoSkipLabel(range)
+            animateSkipProgress((AUTO_SKIP_SEC - 1).toFloat() / AUTO_SKIP_SEC, 1_000L)
+            handler.postDelayed(autoSkipTick, 1_000L)
+            return
+        }
+
+        skipButton.setText(
+            if (range.type == TYPE_INTRO) R.string.player_skip_intro
+            else R.string.player_skip_credits
+        )
+        // Bar drains left-to-right over exactly the window the offer stays up.
+        animateSkipProgress(0f, SKIP_BUTTON_TIMEOUT_MS)
         handler.postDelayed(hideSkip, SKIP_BUTTON_TIMEOUT_MS)
     }
 
     private fun hideSkipButton() {
         handler.removeCallbacks(hideSkip)
+        stopAutoSkip()
         skipProgress.animate().cancel()
         val hadFocus = skipButton.hasFocus()
         skipContainer.visibility = View.GONE
@@ -2793,6 +2872,9 @@ class InternalPlayerActivity : AppCompatActivity() {
             )
             // How much of the stream is held in memory. LoadControl is fixed at build time, so
             // changing this setting rebuilds the player (see applyBufferSize).
+            // Сворачивание и выключение экрана: декодеры Amlogic и Tegra отпускают картинку
+            // дольше 2 с по умолчанию, и Media3 останавливала плеер ошибкой (см. onPlayerError)
+            .setDetachSurfaceTimeoutMs(DETACH_SURFACE_TIMEOUT_MS)
             .setLoadControl(
                 DefaultLoadControl.Builder()
                     .setTargetBufferBytes(playerBufferMb * 1024 * 1024)
@@ -3011,6 +3093,17 @@ class InternalPlayerActivity : AppCompatActivity() {
         override fun onPlayerError(error: PlaybackException) {
             Log.e(TAG, "Playback error: ${error.errorCodeName}", error)
 
+            // Картинку не отпустили вовремя — так бывает, когда приложение сворачивают или
+            // гасят экран (SHIELD, TCL). Это не сбой файла: свернули — onStop запомнит место
+            // и onStart соберёт плеер заново; остались на экране — пересобрать сейчас же
+            if (error.isSurfaceDetachTimeout()) {
+                Log.w(TAG, "Surface detach timed out, not a playback failure")
+                handler.postDelayed({
+                    if (!isFinishing && !stoppedInBackground) restartPlayer("surface detach timeout")
+                }, SURFACE_RESTART_DELAY_MS)
+                return
+            }
+
             // What "combined" is supposed to mean. ExoPlayer's own decoder fallback only
             // covers a decoder that fails to *initialise*; a decoder that starts and then chokes
             // partway through — which is how MPEG-4 in AVI tends to fail — never reached the
@@ -3125,6 +3218,18 @@ class InternalPlayerActivity : AppCompatActivity() {
          * MPEG-4 Part 2 (XviD/DivX). Программный декодер Android для него рассчитан максимум
          * на 352×288, так что откат на него ничего не даёт — сразу в libVLC.
          */
+        private fun PlaybackException.isSurfaceDetachTimeout(): Boolean {
+            if (errorCode != PlaybackException.ERROR_CODE_TIMEOUT) return false
+            var cause: Throwable? = this
+            while (cause != null) {
+                if (cause is ExoTimeoutException) {
+                    return cause.timeoutOperation == ExoTimeoutException.TIMEOUT_OPERATION_DETACH_SURFACE
+                }
+                cause = cause.cause
+            }
+            return false
+        }
+
         /**
          * Ошибка данных, а не сети и не декодера, — и уже посреди просмотра: файл открылся,
          * длительность известна, позиция ушла от начала.
