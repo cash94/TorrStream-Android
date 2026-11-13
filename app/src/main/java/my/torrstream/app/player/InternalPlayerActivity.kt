@@ -135,6 +135,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         // «Переключать серии автоматически» веб-интерфейса. false — список серий в плеере есть,
         // но по концу серии плеер закрывается, как после фильма. Нет extra — переключать.
         const val AUTO_NEXT = "auto_next"
+        // POST-адрес отчётов о сбоях плеера (/api/diagnostics сервера), см. PlaybackDiagnostics
+        const val DIAGNOSTICS_API = "diagnostics_api"
     }
 
     private data class SkipRange(val type: String, val startMs: Long, val endMs: Long) {
@@ -324,6 +326,10 @@ class InternalPlayerActivity : AppCompatActivity() {
      * не пишется.
      */
     private var usingVlc = false
+
+    /** Откаты и сбои этого запуска по порядку — уходят в каждый отчёт диагностики. */
+    private val fallbackSteps = JSONArray()
+    private val startedAt = SystemClock.elapsedRealtime()
 
     /** Set when the player is rebuilt (buffer change) so playback resumes where it left off. */
     private var resumeIndex: Int? = null
@@ -2469,6 +2475,105 @@ class InternalPlayerActivity : AppCompatActivity() {
         return null
     }
 
+    // region диагностика
+
+    /**
+     * Отчёт о сбое на сервер ([PlaybackDiagnostics]). Зовётся до того, как откат поменяет
+     * состояние: в отчёт попадает то, на чём сломалось, а не то, на что переключаемся.
+     */
+    private fun reportDiagnostics(kind: String, reason: String, error: PlaybackException?, failedMime: String? = null) {
+        val elapsed = SystemClock.elapsedRealtime() - startedAt
+        fallbackSteps.put(
+            JSONObject()
+                .put("kind", kind)
+                .put("reason", reason.take(300))
+                .put("code", error?.errorCodeName)
+                .put("atMs", elapsed),
+        )
+        try {
+            val target = currentTorrTarget()
+            PlaybackDiagnostics.report(
+                this,
+                intent.getStringExtra(Extras.DIAGNOSTICS_API)?.takeIf { it.isNotBlank() },
+                intent.getStringExtra(Extras.CLIENT_ID)?.takeIf { it.isNotBlank() },
+                PlaybackDiagnostics.Snapshot(
+                    kind = kind,
+                    reason = reason,
+                    error = error,
+                    failedMime = failedMime,
+                    media = diagnosticsMedia(target?.second, elapsed),
+                    player = diagnosticsPlayer(),
+                    torrServer = target?.first,
+                    torrHeaders = torrHeaders,
+                ),
+            )
+        } catch (e: Throwable) {
+            Log.w(TAG, "Diagnostics snapshot failed: $e")
+        }
+    }
+
+    private fun diagnosticsMedia(hash: String?, elapsedMs: Long) = JSONObject().apply {
+        val p = player
+        val uri = p?.currentMediaItem?.localConfiguration?.uri ?: intent.data
+        intent.getStringExtra(Extras.TITLE)?.let { put("title", it.take(200)) }
+        hash?.let { put("hash", it) }
+        uri?.let { u ->
+            (u.getQueryParameter("index") ?: u.pathSegments.let { seg ->
+                val at = seg.indexOf("play")
+                seg.getOrNull(at + 2).takeIf { at >= 0 }
+            })?.let { put("fileIndex", it) }
+            put("scheme", u.scheme)
+            put("hls", u.path?.endsWith(".m3u8") == true)
+            // Имя в ссылке есть не всегда (у TorrServer — /stream?link=…); тогда его спросит
+            // PlaybackDiagnostics у самого TorrServer
+            u.lastPathSegment?.takeIf { it.contains('.') }?.let {
+                put("fileName", it.take(300))
+                put("container", it.substringAfterLast('.').lowercase(Locale.US))
+            }
+        }
+        put("elapsedMs", elapsedMs)
+        if (p != null) {
+            put("positionMs", p.currentPosition)
+            if (p.duration != C.TIME_UNSET) put("durationMs", p.duration)
+            put("bufferedMs", p.bufferedPosition)
+            put("state", p.playbackState)
+            put("playlistIndex", p.currentMediaItemIndex)
+            put("playlistSize", p.mediaItemCount)
+            val size = p.videoSize
+            if (size.width > 0) put("videoSize", "${size.width}x${size.height}")
+            put("tracks", PlaybackDiagnostics.tracksJson(p.currentTracks))
+        }
+    }
+
+    private fun diagnosticsPlayer() = JSONObject().apply {
+        put("engine", if (playerEngine == Prefs.ENGINE_VLC) "vlc" else "auto")
+        put("current", if (usingVlc) "vlc" else "exo")
+        put("decoderMode", when (playerDecoderMode) {
+            Prefs.DECODER_HARDWARE -> "hardware"
+            Prefs.DECODER_SOFTWARE -> "software"
+            else -> "combined"
+        })
+        put("audioMode", audioModeName(playerAudioMode))
+        put("effectiveAudioMode", audioModeName(audioMode))
+        put("audioLimit", audioLimit.name)
+        put("usbAudio", usbAudio)
+        put("softwareVideoFallback", softwareVideoFallback)
+        put("pcmAudioFallback", pcmAudioFallback)
+        put("safeAudioFallback", safeAudioFallback)
+        put("bufferMb", playerBufferMb)
+        // Копия: сам список дописывается дальше, а отчёт уходит в другой поток
+        put("steps", JSONArray(fallbackSteps.toString()))
+    }
+
+    private fun audioModeName(mode: Int) = when (mode) {
+        Prefs.AUDIO_PCM -> "pcm"
+        Prefs.AUDIO_PASSTHROUGH -> "passthrough"
+        Prefs.AUDIO_AUTO -> "auto"
+        else -> "mode$mode"
+    }
+
+    // endregion
+
     private fun loadTorrStats(base: String, hash: String): List<HudStat>? {
         var connection: HttpURLConnection? = null
         return try {
@@ -2798,6 +2903,12 @@ class InternalPlayerActivity : AppCompatActivity() {
                     val groups = tracks.groups.filter { it.type == type }
                     if (groups.isNotEmpty() && groups.none { it.isSupported }) {
                         val mime = groups.first().getTrackFormat(0).sampleMimeType
+                        reportDiagnostics(
+                            PlaybackDiagnostics.KIND_VLC_UNSUPPORTED_TRACK,
+                            "no supported ${if (type == C.TRACK_TYPE_VIDEO) "video" else "audio"} track ($mime)",
+                            null,
+                            mime,
+                        )
                         switchToVlc("no supported ${if (type == C.TRACK_TYPE_VIDEO) "video" else "audio"} track ($mime)")
                         return
                     }
@@ -2823,6 +2934,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 error.isVideoFailure() &&
                 !error.isMpeg4Part2()
             ) {
+                reportDiagnostics(PlaybackDiagnostics.KIND_SOFTWARE_VIDEO, "hardware video decoder failed", error)
                 videoFallbackTried = true
                 softwareVideoFallback = true
                 Log.w(TAG, "Hardware video decoder failed, retrying in software: ${error.errorCodeName}")
@@ -2839,6 +2951,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 audioMode != Prefs.AUDIO_PCM &&
                 error.errorCode in AUDIO_OUTPUT_ERRORS
             ) {
+                reportDiagnostics(PlaybackDiagnostics.KIND_PCM_AUDIO, "audio passthrough failed", error)
                 pcmAudioFallback = true
                 Log.w(TAG, "Audio passthrough failed, decoding to PCM: ${error.errorCodeName}")
                 App.toast(R.string.player_audio_pcm_fallback, true)
@@ -2853,6 +2966,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 !safeAudioFallback &&
                 (error.errorCode in AUDIO_OUTPUT_ERRORS || error.isAudioDecoderError())
             ) {
+                reportDiagnostics(PlaybackDiagnostics.KIND_SAFE_AUDIO, "audio failed (USB: $usbAudio)", error)
                 safeAudioFallback = true
                 Log.w(TAG, "Audio failed (USB: $usbAudio), retrying stereo 16-bit: ${error.errorCodeName}")
                 App.toast(R.string.player_audio_safe_fallback, true)
@@ -2863,6 +2977,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             // Последний шаг перед отказом: libVLC со своим FFmpeg — тем же, чем внешние плееры
             // играют AVI с XviD/DivX. Сюда же — контейнер, который ExoPlayer не разбирает.
             if (!usingVlc && error.isVlcWorthTrying()) {
+                reportDiagnostics(PlaybackDiagnostics.KIND_VLC, "ExoPlayer failed: ${error.errorCodeName}", error)
                 switchToVlc("${error.errorCodeName} ${error.formatDetail().orEmpty()}")
                 return
             }
@@ -2872,6 +2987,11 @@ class InternalPlayerActivity : AppCompatActivity() {
             val detail = listOfNotNull(error.formatDetail(), error.errorCodeName)
                 .joinToString(", ")
             Log.e(TAG, "Giving up on playback: $detail")
+            reportDiagnostics(
+                PlaybackDiagnostics.KIND_FAILED,
+                "${if (usingVlc) "libVLC" else "ExoPlayer"} gave up: $detail",
+                error,
+            )
             App.toast(getString(R.string.player_playback_failed, detail), true)
             finish()
         }

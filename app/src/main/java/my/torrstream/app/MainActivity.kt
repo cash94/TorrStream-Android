@@ -2896,6 +2896,15 @@ class MainActivity : BaseActivity(),
                 .takeIf { it.isNotBlank() && it != "null" } ?: webClientId
             clientId?.let { putExtra(InternalPlayerActivity.Extras.CLIENT_ID, it) }
 
+            // Отчёты о сбоях плеера (откаты на libVLC и т. п.) — на сервер, с которого открыта
+            // страница: по ним чиним встроенный плеер (PlaybackDiagnostics)
+            val diagnosticsApi = jsonObject.optString("diagnostics_api").takeIf { it.startsWith("http") }
+                ?: Uri.parse(LAMPA_URL.trim()).let { uri ->
+                    if (uri.scheme.isNullOrEmpty() || uri.encodedAuthority.isNullOrEmpty()) null
+                    else "${uri.scheme}://${uri.encodedAuthority}/api/diagnostics"
+                }
+            diagnosticsApi?.let { putExtra(InternalPlayerActivity.Extras.DIAGNOSTICS_API, it) }
+
             // Фокус кнопок плеера — того же цвета, что и в веб-интерфейсе
             val focusColor = jsonObject.optString("focus_color")
                 .takeIf { it.startsWith("#") } ?: webFocusColor
