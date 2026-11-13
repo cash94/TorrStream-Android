@@ -52,6 +52,7 @@ import my.torrstream.app.helpers.coverDisplayCutout
 import my.torrstream.app.helpers.hideSystemUI
 import java.net.URL
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -238,6 +239,13 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val BACK_EXIT_MS = 2_000L
 
         private val MPEG4_PART2_MIMES = setOf(MimeTypes.VIDEO_MP4V, MimeTypes.VIDEO_DIVX, MimeTypes.VIDEO_H263)
+
+        /** Кодеки, которые больше 1080p без аппаратного декодера не идут ни в чём, см. [hardwareOnlyFormat]. */
+        private val HARDWARE_ONLY_CODECS = mapOf(
+            MimeTypes.VIDEO_AV1 to "AV1",
+            MimeTypes.VIDEO_H265 to "HEVC",
+            MimeTypes.VIDEO_VP9 to "VP9",
+        )
 
         /** Звуковой выход не открылся или отказал — так ломается битстрим, который не принят. */
         private val AUDIO_OUTPUT_ERRORS = setOf(
@@ -2512,6 +2520,35 @@ class InternalPlayerActivity : AppCompatActivity() {
     // region диагностика
 
     /**
+     * «AV1 3840×2160», если это видео больше 1080p в кодеке, который без аппаратного
+     * декодера не идёт ни в чём, а такого декодера на устройстве нет; иначе null.
+     *
+     * Программно (dav1d — он же внутри VLC) AV1 4K на 4×Cortex-A55 декодируется со скоростью
+     * 8,5 кадра/с, на NVIDIA SHIELD — порядка 13–15, а фильму нужно 24. Уход в libVLC давал
+     * слайд-шоу; честнее сразу сказать, что устройство этот формат не тянет. Всё остальное
+     * (до 1080p, MPEG-4 в AVI, WMV…) libVLC играет — туда по-прежнему откатываемся.
+     */
+    private fun hardwareOnlyFormat(format: Format?): String? {
+        format ?: return null
+        val mime = format.sampleMimeType ?: return null
+        val name = HARDWARE_ONLY_CODECS[mime] ?: return null
+        if (format.width <= 1920 && format.height <= 1088) return null
+        val hardware = try {
+            MediaCodecUtil.getDecoderInfos(mime, false, false).any { it.hardwareAccelerated }
+        } catch (e: MediaCodecUtil.DecoderQueryException) {
+            true
+        }
+        return if (hardware) null else "$name ${format.width}×${format.height}"
+    }
+
+    private fun showFormatUnsupported(format: String, mime: String?) {
+        Log.w(TAG, "No hardware decoder for $format, not falling back to libVLC")
+        reportDiagnostics(PlaybackDiagnostics.KIND_FORMAT_UNSUPPORTED, "no hardware decoder: $format", null, mime)
+        App.toast(getString(R.string.player_format_unsupported, format), true)
+        finish()
+    }
+
+    /**
      * Отчёт о сбое на сервер ([PlaybackDiagnostics]). Зовётся до того, как откат поменяет
      * состояние: в отчёт попадает то, на чём сломалось, а не то, на что переключаемся.
      */
@@ -2947,6 +2984,12 @@ class InternalPlayerActivity : AppCompatActivity() {
                     // в onPlayerError
                     if (groups.isNotEmpty() && groups.none { it.isSupported(/* allowExceedsCapabilities= */ true) }) {
                         val mime = groups.first().getTrackFormat(0).sampleMimeType
+                        if (type == C.TRACK_TYPE_VIDEO) {
+                            hardwareOnlyFormat(groups.first().getTrackFormat(0))?.let {
+                                showFormatUnsupported(it, mime)
+                                return
+                            }
+                        }
                         reportDiagnostics(
                             PlaybackDiagnostics.KIND_VLC_UNSUPPORTED_TRACK,
                             "no supported ${if (type == C.TRACK_TYPE_VIDEO) "video" else "audio"} track ($mime)",
@@ -3035,6 +3078,11 @@ class InternalPlayerActivity : AppCompatActivity() {
             // Последний шаг перед отказом: libVLC со своим FFmpeg — тем же, чем внешние плееры
             // играют AVI с XviD/DivX. Сюда же — контейнер, который ExoPlayer не разбирает.
             if (!usingVlc && error.isVlcWorthTrying()) {
+                // Декодер есть, но программный и не справился с 4K — VLC будет не лучше
+                hardwareOnlyFormat((error as? ExoPlaybackException)?.rendererFormat)?.let {
+                    showFormatUnsupported(it, (error as ExoPlaybackException).rendererFormat?.sampleMimeType)
+                    return
+                }
                 reportDiagnostics(PlaybackDiagnostics.KIND_VLC, "ExoPlayer failed: ${error.errorCodeName}", error)
                 switchToVlc("${error.errorCodeName} ${error.formatDetail().orEmpty()}")
                 return

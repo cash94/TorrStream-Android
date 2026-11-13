@@ -81,6 +81,7 @@
     <string name="player_decoder_hardware_desc">Hardware only. No sound where AC3/DTS is unsupported</string>
     <string name="player_decoder_software_desc">Software first. Helps with AVI (DivX/Xvid), loads the CPU</string>
     <string name="player_playback_failed">Cannot play: %1$s</string>
+    <string name="player_format_unsupported">This device cannot decode this format: %1$s</string>
     <string name="player_decoder">Decoder</string>
     <string name="player_engine">Engine</string>
     <string name="player_engine_desc">What plays the video: ExoPlayer or the bundled VLC</string>

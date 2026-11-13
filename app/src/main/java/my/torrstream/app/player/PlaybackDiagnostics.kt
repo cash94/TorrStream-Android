@@ -76,6 +76,7 @@ object PlaybackDiagnostics {
     const val KIND_VLC_UNSUPPORTED_TRACK = "vlc_unsupported_track"
     const val KIND_FAILED = "playback_failed"
     const val KIND_STREAM_RESTART = "stream_restart"
+    const val KIND_FORMAT_UNSUPPORTED = "format_unsupported"
 
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "playback-diagnostics").apply { isDaemon = true }

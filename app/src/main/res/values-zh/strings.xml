@@ -79,6 +79,7 @@
     <string name="player_decoder_hardware_desc">仅硬件解码。不支持 AC3/DTS 的设备将没有声音</string>
     <string name="player_decoder_software_desc">优先软件解码。对 AVI (DivX/Xvid) 有帮助，占用处理器</string>
     <string name="player_playback_failed">无法播放：%1$s</string>
+    <string name="player_format_unsupported">此设备无法解码该格式：%1$s</string>
     <string name="player_decoder">解码器</string>
     <string name="player_engine">引擎</string>
     <string name="player_engine_desc">播放视频所用引擎：ExoPlayer 或内置 VLC</string>
