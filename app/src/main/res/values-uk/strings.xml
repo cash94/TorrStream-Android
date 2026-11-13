@@ -56,6 +56,8 @@
     <string name="player_episode_number">Епізод %1$d</string>
     <string name="player_skip_intro">⏩ Пропустити вступ</string>
     <string name="player_skip_credits">⏩ Пропустити титри</string>
+    <string name="player_auto_skip_intro">⏩ Пропуск заставки через %1$d · ОК — дивитися</string>
+    <string name="player_auto_skip_credits">⏭ Наступна серія через %1$d · ОК — дивитися титри</string>
     <string name="player_seek_step">%1$d сек</string>
     <string name="player_settings">Налаштування</string>
     <string name="player_clock">Годинник</string>

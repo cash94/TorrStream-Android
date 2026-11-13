@@ -56,6 +56,8 @@
     <string name="player_episode_number">第 %1$d 集</string>
     <string name="player_skip_intro">⏩ 跳过片头</string>
     <string name="player_skip_credits">⏩ 跳过片尾</string>
+    <string name="player_auto_skip_intro">⏩ %1$d 秒后跳过片头 · 按 OK 观看</string>
+    <string name="player_auto_skip_credits">⏭ %1$d 秒后播放下一集 · 按 OK 观看片尾</string>
     <string name="player_seek_step">%1$d 秒</string>
     <string name="player_settings">设置</string>
     <string name="player_clock">时钟</string>

@@ -56,6 +56,8 @@
     <string name="player_episode_number">Эпизод %1$d</string>
     <string name="player_skip_intro">⏩ Пропустить вступление</string>
     <string name="player_skip_credits">⏩ Пропустить титры</string>
+    <string name="player_auto_skip_intro">⏩ Пропуск заставки через %1$d · ОК — смотреть</string>
+    <string name="player_auto_skip_credits">⏭ Следующая серия через %1$d · ОК — смотреть титры</string>
     <string name="player_seek_step">%1$d сек</string>
     <string name="player_settings">Настройки</string>
     <string name="player_clock">Часы</string>

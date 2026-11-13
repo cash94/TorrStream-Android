@@ -2818,6 +2818,8 @@ class MainActivity : BaseActivity(),
             putExtra(InternalPlayerActivity.Extras.TITLE, videoTitle)
             headers?.let { putExtra(InternalPlayerActivity.Extras.HEADERS, it) }
             putExtra(InternalPlayerActivity.Extras.AUTO_NEXT, jsonObject.optBoolean("auto_next", true))
+            // «Автопропуск заставки и титров»: кнопка пропуска отсчитывает и пропускает сама
+            putExtra(InternalPlayerActivity.Extras.AUTO_SKIP, jsonObject.optBoolean("auto_skip", false))
 
             when {
                 playerTimeCode == "continue" -> putExtra(
