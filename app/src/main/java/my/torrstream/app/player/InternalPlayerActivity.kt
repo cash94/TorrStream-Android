@@ -75,6 +75,9 @@ import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
+import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
+import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
@@ -145,6 +148,9 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "InternalPlayer"
+
+        /** Сколько раз за запуск плеер продолжает с того же места после порченых данных потока. */
+        private const val MAX_STREAM_RESTARTS = 3
         const val RESULT_ACTION = "my.torrstream.app.player.result.VIEW"
         const val END_BY_COMPLETION = "completion"
         const val END_BY_USER = "user"
@@ -329,6 +335,9 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     /** Откаты и сбои этого запуска по порядку — уходят в каждый отчёт диагностики. */
     private val fallbackSteps = JSONArray()
+
+    /** Перезапуски с того же места после ошибки данных посреди просмотра, см. onPlayerError. */
+    private var streamRestarts = 0
     private val startedAt = SystemClock.elapsedRealtime()
 
     /** Set when the player is rebuilt (buffer change) so playback resumes where it left off. */
@@ -731,6 +740,31 @@ class InternalPlayerActivity : AppCompatActivity() {
             ): AudioSink? = AudioOutput.buildExoAudioSink(
                 context, audioMode, audioLimit, enableFloatOutput, enableAudioTrackPlaybackParams,
             ) ?: super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+
+            // Тот же рендерер MediaCodec, но AAC Main/SSR/LTP, которых декодер устройства не
+            // заявляет, он отдаёт FFmpeg (AacProfileAudioRenderer)
+            override fun buildAudioRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                audioSink: AudioSink,
+                eventHandler: Handler,
+                eventListener: AudioRendererEventListener,
+                out: ArrayList<Renderer>,
+            ) {
+                super.buildAudioRenderers(
+                    context, extensionRendererMode, mediaCodecSelector, enableDecoderFallback,
+                    audioSink, eventHandler, eventListener, out,
+                )
+                val index = out.indexOfFirst { it.javaClass == MediaCodecAudioRenderer::class.java }
+                if (index >= 0) {
+                    out[index] = AacProfileAudioRenderer(
+                        context, codecAdapterFactory, mediaCodecSelector, enableDecoderFallback,
+                        eventHandler, eventListener, audioSink,
+                    )
+                }
+            }
         }
         Log.i(TAG, "Audio output mode $audioMode, limit $audioLimit")
         val mode = if (softwareVideoFallback) Prefs.DECODER_SOFTWARE else playerDecoderMode
@@ -2704,6 +2738,11 @@ class InternalPlayerActivity : AppCompatActivity() {
     private fun buildExoPlayer(headers: Map<String, String>): Player {
         val httpFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
+            // TorrServer отвечает, когда кусок скачан: 8 с по умолчанию на медленной раздаче
+            // мало, а каждый обрыв — лишнее переподключение. Повторы — без счёта
+            // (WaitForStreamPolicy)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(30_000)
             .apply { if (headers.isNotEmpty()) setDefaultRequestProperties(headers) }
 
         val ass = AssSubtitles(this)
@@ -2901,7 +2940,12 @@ class InternalPlayerActivity : AppCompatActivity() {
             if (!usingVlc) {
                 for (type in intArrayOf(C.TRACK_TYPE_VIDEO, C.TRACK_TYPE_AUDIO)) {
                     val groups = tracks.groups.filter { it.type == type }
-                    if (groups.isNotEmpty() && groups.none { it.isSupported }) {
+                    // Превышение возможностей — не отказ: декодеры заявляют уровни с запасом
+                    // (MediaTek — HEVC 5.1 Main tier, а UHD BDRemux — 5.1 High tier), и такие
+                    // файлы на этих ТВ играют. ExoPlayer такую дорожку выбирает сам
+                    // (exceedRendererCapabilitiesIfNecessary); не справится декодер — откат
+                    // в onPlayerError
+                    if (groups.isNotEmpty() && groups.none { it.isSupported(/* allowExceedsCapabilities= */ true) }) {
                         val mime = groups.first().getTrackFormat(0).sampleMimeType
                         reportDiagnostics(
                             PlaybackDiagnostics.KIND_VLC_UNSUPPORTED_TRACK,
@@ -2932,7 +2976,8 @@ class InternalPlayerActivity : AppCompatActivity() {
                 !videoFallbackTried &&
                 playerDecoderMode == Prefs.DECODER_COMBINED &&
                 error.isVideoFailure() &&
-                !error.isMpeg4Part2()
+                !error.isMpeg4Part2() &&
+                !error.isAboveFullHd()
             ) {
                 reportDiagnostics(PlaybackDiagnostics.KIND_SOFTWARE_VIDEO, "hardware video decoder failed", error)
                 videoFallbackTried = true
@@ -2971,6 +3016,19 @@ class InternalPlayerActivity : AppCompatActivity() {
                 Log.w(TAG, "Audio failed (USB: $usbAudio), retrying stereo 16-bit: ${error.errorCodeName}")
                 App.toast(R.string.player_audio_safe_fallback, true)
                 handler.post { restartPlayer("safe audio fallback") }
+                return
+            }
+
+            // Посреди просмотра разборщик получил не те байты («No valid varint length mask
+            // found» в MKV, сбой HTTP-клиента системы): так бывает, когда TorrServer не успевает
+            // за потоком. Файл при этом цел — новый разборщик найдёт ближайший кластер по
+            // индексу и запросит данные заново. Раньше плеер на этом закрывался (3 отчёта)
+            if (!usingVlc && streamRestarts < MAX_STREAM_RESTARTS && error.isMidStreamDataError()) {
+                reportDiagnostics(PlaybackDiagnostics.KIND_STREAM_RESTART, "stream data error at ${lastPosition / 1000}s, restart #${streamRestarts + 1}", error)
+                streamRestarts++
+                Log.w(TAG, "Stream data error mid-playback, restarting at ${lastPosition}ms: ${error.errorCodeName}")
+                App.toast(R.string.player_stream_restart, false)
+                handler.post { restartPlayer("stream restart") }
                 return
             }
 
@@ -3019,6 +3077,27 @@ class InternalPlayerActivity : AppCompatActivity() {
          * MPEG-4 Part 2 (XviD/DivX). Программный декодер Android для него рассчитан максимум
          * на 352×288, так что откат на него ничего не даёт — сразу в libVLC.
          */
+        /**
+         * Ошибка данных, а не сети и не декодера, — и уже посреди просмотра: файл открылся,
+         * длительность известна, позиция ушла от начала.
+         */
+        private fun PlaybackException.isMidStreamDataError(): Boolean =
+            errorCode in setOf(
+                PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+                PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+            ) && lastDuration > 0 && lastPosition > 0
+
+        /**
+         * Кадр больше 1080p: программный декодер с таким не справится (4K HEVC на приставке —
+         * единицы кадров в секунду), откат на него только затягивает переход в libVLC.
+         */
+        private fun PlaybackException.isAboveFullHd(): Boolean {
+            val format = (this as? ExoPlaybackException)?.rendererFormat
+                ?: (player as? ExoPlayer)?.videoFormat
+                ?: return false
+            return format.width > 1920 || format.height > 1088
+        }
+
         private fun PlaybackException.isMpeg4Part2(): Boolean =
             (this as? ExoPlaybackException)?.rendererFormat?.sampleMimeType in MPEG4_PART2_MIMES
 

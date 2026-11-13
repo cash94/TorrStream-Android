@@ -75,6 +75,7 @@ object PlaybackDiagnostics {
     const val KIND_VLC = "vlc_fallback"
     const val KIND_VLC_UNSUPPORTED_TRACK = "vlc_unsupported_track"
     const val KIND_FAILED = "playback_failed"
+    const val KIND_STREAM_RESTART = "stream_restart"
 
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "playback-diagnostics").apply { isDaemon = true }
@@ -168,6 +169,9 @@ object PlaybackDiagnostics {
     private fun addTorrentFile(snapshot: Snapshot) {
         val base = snapshot.torrServer ?: return
         val media = snapshot.media
+        // Какой сервер отдаёт поток: TorrServer (MatriX.…) или MonoServer — ошибки данных
+        // посреди просмотра могут быть его
+        torrServerVersion(base, snapshot.torrHeaders)?.let { media.put("torrServer", it) }
         val hash = media.optString("hash").takeIf { it.isNotEmpty() } ?: return
         val index = media.optString("fileIndex").toIntOrNull()
         var connection: HttpURLConnection? = null
@@ -202,6 +206,24 @@ object PlaybackDiagnostics {
             }
         } catch (e: Exception) {
             Log.d(TAG, "TorrServer file info unavailable: ${e.message}")
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    /** Ответ /echo TorrServer — строка версии; null, если не ответил. */
+    private fun torrServerVersion(base: String, headers: Map<String, String>): String? {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("$base/echo").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 4_000
+                readTimeout = 4_000
+                headers.forEach { (key, value) -> setRequestProperty(key, value) }
+            }
+            if (connection.responseCode !in 200..299) return null
+            connection.inputStream.bufferedReader().use { it.readText() }.trim().take(100).ifEmpty { null }
+        } catch (e: Exception) {
+            null
         } finally {
             connection?.disconnect()
         }

@@ -90,7 +90,10 @@ class AssSubtitles(context: Context) {
     /** Фабрика на каждый элемент очереди: разбору файла надо знать, чей он. */
     fun mediaSourceFactory(dataSource: DataSource.Factory): MediaSource.Factory {
         fun factoryFor(item: MediaItem?) =
-            DefaultMediaSourceFactory(dataSource, AssExtractors(item)).setSubtitleParserFactory(parsers)
+            DefaultMediaSourceFactory(dataSource, AssExtractors(item))
+                .setSubtitleParserFactory(parsers)
+                // TorrServer не отдаёт — ждать, а не закрываться (WaitForStreamPolicy)
+                .setLoadErrorHandlingPolicy(WaitForStreamPolicy())
 
         return object : MediaSource.Factory by factoryFor(null) {
             override fun createMediaSource(mediaItem: MediaItem): MediaSource =
@@ -155,7 +158,11 @@ class AssSubtitles(context: Context) {
             extractors.forEachIndexed { i, extractor ->
                 if (extractor is MatroskaExtractor) extractors[i] = mkv
             }
-            return extractors
+            // Переход, потерянный при сбое открытия потока, — повторить (SeekGuardExtractor);
+            // Dolby Vision profile 7 без декодера DV — как HEVC (DolbyVisionBaseLayer)
+            return Array(extractors.size) {
+                SeekGuardExtractor(DolbyVisionBaseLayerExtractor(extractors[it]))
+            }
         }
     }
 
