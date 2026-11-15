@@ -29,6 +29,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Скачанный файл запускаем из памяти приложения — это разрешено, пока targetSdk < 29
  * (у нас 28); с 29 такое запрещено (W^X), и бинарник пришлось бы вшивать в APK.
  *
+ * Версия закреплена — [PINNED_TAG], последний MatriX. С ноября 2026 апстрим выпускает
+ * ветку Silo с другим API, с которой веб не работает, поэтому releases/latest не берём.
+ * Уже скачанную не-MatriX версию (Silo) приложение при запуске само меняет на
+ * [PINNED_TAG] — см. [autostartIfNeeded].
+ *
  * Свою копию не запускаем, если порт 8090 уже отвечает: у пользователя может работать
  * TorrServe или другой TorrServer — две копии на одном порту не уживутся.
  *
@@ -44,7 +49,9 @@ object TorrServerManager {
     /** Порт MonoServer для Android (online.torrstream.monoserver: Env.DEFAULT_PORT) */
     const val MONO_PORT = 8099
     const val MONO_PACKAGE = "online.torrstream.monoserver"
-    private const val RELEASES = "https://api.github.com/repos/YouROK/TorrServer/releases/latest"
+    /** Закреплённая версия TorrServer: последний MatriX (Silo несовместим с API MatriX) */
+    const val PINNED_TAG = "MatriX.150"
+    private const val DOWNLOAD_BASE = "https://github.com/YouROK/TorrServer/releases/download/$PINNED_TAG/"
     private const val PREFS = "torrserver"
     private const val PREF_VERSION = "version"
     private const val PREF_AUTOSTART = "autostart"
@@ -83,7 +90,8 @@ object TorrServerManager {
     @Volatile private var monoStartingAt = 0L                 // когда открыли приложение MonoServer
     private val monoStarting get() = monoStartingAt != 0L && System.currentTimeMillis() - monoStartingAt < 20_000
     @Volatile private var portCheckedAt = 0L
-    @Volatile var latestVersion: String? = null; private set
+    /** Версия, до которой веб предлагает «Обновить», — всегда закреплённая */
+    @Volatile var latestVersion: String? = PINNED_TAG; private set
     private val checking = AtomicBoolean(false)
 
     /** Сборка TorrServer под процессор устройства или null, если такой нет */
@@ -217,32 +225,22 @@ object TorrServerManager {
 
     // ==================== УСТАНОВКА ====================
 
-    /** Последний релиз и ссылка на файл под это устройство */
-    private fun fetchLatest(): Pair<String, String> {
+    /** Закреплённый релиз и ссылка на файл под это устройство (GitHub API не нужен) */
+    private fun pinnedRelease(): Pair<String, String> {
         val suffix = assetSuffix ?: throw IOException("Процессор устройства не поддерживается")
-        val body = client.newCall(Request.Builder().url(RELEASES).header("Accept", "application/vnd.github+json").build())
-            .execute().use { resp ->
-                if (!resp.isSuccessful) throw IOException("GitHub ответил ${resp.code()}")
-                resp.body()?.string() ?: throw IOException("Пустой ответ GitHub")
-            }
-        val json = JSONObject(body)
-        val tag = json.optString("tag_name")
-        val assets = json.optJSONArray("assets") ?: throw IOException("В релизе нет файлов")
-        for (i in 0 until assets.length()) {
-            val a = assets.getJSONObject(i)
-            if (a.optString("name") == "TorrServer-$suffix") return tag to a.optString("browser_download_url")
-        }
-        throw IOException("Нет сборки TorrServer-$suffix")
+        return PINNED_TAG to DOWNLOAD_BASE + "TorrServer-$suffix"
     }
 
+    /** Совместимая ли версия: веб работает только с API MatriX (Silo — другой) */
+    private fun isMatrix(version: String?) = version?.startsWith("MatriX.") == true
+
+    /** «Проверить обновление»: версия закреплена — сеть не нужна */
     fun checkLatestAsync() {
-        scope.launch {
-            try { latestVersion = fetchLatest().first } catch (e: Exception) { Log.w(TAG, "latest: ${e.message}") }
-        }
+        latestVersion = PINNED_TAG
     }
 
     /**
-     * Скачивает последнюю версию и, если всё прошло, запускает. Своя копия на время
+     * Скачивает закреплённую версию ([PINNED_TAG]) и, если всё прошло, запускает. Своя копия на время
      * замены файла останавливается — работающий бинарник не перезаписать.
      */
     fun installAsync(startAfter: Boolean = true) {
@@ -252,8 +250,7 @@ object TorrServerManager {
         error = null
         scope.launch {
             try {
-                val (tag, url) = fetchLatest()
-                latestVersion = tag
+                val (tag, url) = pinnedRelease()
                 dir.mkdirs()
                 val tmp = File(dir, "TorrServer.download")
                 client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
@@ -365,10 +362,29 @@ object TorrServerManager {
         }
     }
 
-    /** Запуск приложения: подняли сервер в прошлый раз — поднимаем снова */
+    /**
+     * Запуск приложения: подняли сервер в прошлый раз — поднимаем снова. Скачан не MatriX
+     * (Silo из releases/latest старых версий приложения) — сначала меняем его на
+     * [PINNED_TAG]; installAsync сам остановит свою копию и запустит новую.
+     */
     fun autostartIfNeeded() {
         // MonoServer поднимается сам (его автозапуск), своя копия рядом не нужна
-        if (autostart && isInstalled && !isMonoInstalled) startIfFree()
+        val wantStart = autostart && !isMonoInstalled
+        if (isInstalled && !isMatrix(installedVersion)) {
+            Log.i(TAG, "Установлен TorrServer ${installedVersion ?: "?"} — меняю на $PINNED_TAG")
+            installAsync(startAfter = wantStart)
+            return
+        }
+        if (wantStart && isInstalled) startIfFree()
+        // Своя копия уже работает (служба пережила закрытие приложения): сверяем по /echo,
+        // что это MatriX, — версия в настройках могла разойтись с файлом
+        if (isOwnRunning) scope.launch {
+            val running = checkPort()
+            if (running != null && isOwnRunning && !isMatrix(running)) {
+                Log.i(TAG, "Работает TorrServer $running — меняю на $PINNED_TAG")
+                installAsync(startAfter = true)
+            }
+        }
     }
 
     fun deleteBinary() {
