@@ -66,6 +66,15 @@ class App : MultiDexApplication() {
         val context: Context
             get() = appContext
 
+        /**
+         * Провайдеры создаются и принимают запросы раньше Application.onCreate: «ATV Поиск»
+         * будит процесс запросом к search/SearchProvider, и App.context к этому моменту ещё
+         * пуст. Тогда берём контекст приложения; onCreate потом заменит его своим (с языком).
+         */
+        fun ensureContext(ctx: Context) {
+            if (!::appContext.isInitialized) appContext = ctx.applicationContext ?: ctx
+        }
+
         private val lifecycleEventObserver = LifecycleEventObserver { _, event ->
             inForeground = when (event) {
                 Lifecycle.Event.ON_START -> {

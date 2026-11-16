@@ -8,6 +8,7 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.provider.BaseColumns
 import android.util.Log
+import my.torrstream.app.App
 import my.torrstream.app.R
 import my.torrstream.app.tmdb.TMDB
 import my.torrstream.app.tmdb.models.entity.Entity
@@ -28,7 +29,11 @@ import kotlin.math.roundToInt
  */
 class SearchProvider : ContentProvider() {
 
-    override fun onCreate(): Boolean = true
+    override fun onCreate(): Boolean {
+        // Запрос может прийти раньше Application.onCreate (процесс разбудил сам поиск)
+        context?.let { App.ensureContext(it) }
+        return true
+    }
 
     override fun query(
         uri: Uri,
