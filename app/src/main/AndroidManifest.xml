@@ -197,12 +197,15 @@
             </intent-filter>
         </receiver>
 
-        <!-- Результаты для глобального поиска Android TV; читать их может только системный поиск -->
+        <!-- Результаты для глобального поиска Android TV. Без readPermission GLOBAL_SEARCH:
+             его получает только системный поиск, а на приставках без Google-поиска
+             ищут сторонние приложения («ATV Поиск» и т. п.) — им был Permission Denial.
+             Отдаёт только публичную выдачу TMDB. -->
         <provider
             android:name=".search.SearchProvider"
             android:authorities="my.torrstream.app.atvsearch"
             android:exported="true"
-            android:readPermission="android.permission.GLOBAL_SEARCH" />
+            tools:ignore="ExportedContentProvider" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.update_provider"
