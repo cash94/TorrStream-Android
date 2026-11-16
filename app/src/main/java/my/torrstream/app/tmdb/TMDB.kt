@@ -135,7 +135,15 @@ object TMDB {
         return HttpHelper.getOkHttpClient(timeout)
     }
 
-    fun videos(endpoint: String, params: MutableMap<String, String>): Entities? {
+    // Общий HTTP-клиент: DoH-резолвер на каждый запрос заново — лишняя секунда,
+    // а глобальный поиск Android TV ждёт ответа недолго
+    private val client: OkHttpClient by lazy {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
+            startWithQuad9DNS() else permissiveOkHttp()
+    }
+
+    /** GET [endpoint] с [params] по адресу TMDB из настроек (свой прокси сохраняет свои параметры). */
+    private fun getBody(endpoint: String, params: Map<String, String>): String? {
         val apiUrl = App.context.tmdbApiUrl
         val apiUri = apiUrl.toUri()
         // Manually handle the authority part to prevent encoding of the port colon
@@ -145,9 +153,6 @@ object TMDB {
             .scheme(apiUri.scheme)
             .encodedAuthority(authority)  // Use encodedAuthority instead of authority to prevent double encoding
             .path("$basePath/$endpoint")
-        // key must be 1st
-        params["api_key"] = APIKEY
-        params["language"] = getLang()
         for (param in params) {
             urlBuilder.appendQueryParameter(param.key, param.value)
         }
@@ -161,13 +166,11 @@ object TMDB {
 
         var body: String? = null
         val link = urlBuilder.build().toString()
-        debugLog("TMDB videos($endpoint) apiUri[$apiUri] link[$link]")
+        debugLog("TMDB get($endpoint) apiUri[$apiUri] link[$link]")
         try {
             val request = Request.Builder()
                 .url(link)
                 .build()
-            val client = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
-                startWithQuad9DNS() else permissiveOkHttp()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw IOException("Unexpected code $response")
                 body = response.body()?.string()
@@ -176,6 +179,14 @@ object TMDB {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+        return body
+    }
+
+    fun videos(endpoint: String, params: MutableMap<String, String>): Entities? {
+        // key must be 1st
+        params["api_key"] = APIKEY
+        params["language"] = getLang()
+        val body = getBody(endpoint, params)
         debugLog("TMDB body: $body")
         if (body.isNullOrEmpty())
             return null
@@ -198,21 +209,31 @@ object TMDB {
         return entities
     }
 
+    /**
+     * Фильмы и сериалы по названию — один запрос search/multi, без подробностей
+     * по каждому (в отличие от [videos]): для глобального поиска Android TV,
+     * которому важна скорость. Люди и прочее отбрасываются.
+     */
+    fun search(query: String): List<Entity> {
+        val params = linkedMapOf(
+            "api_key" to APIKEY,
+            "language" to getLang(),
+            "query" to query,
+            "include_adult" to "false",
+        )
+        val body = getBody("search/multi", params)
+        if (body.isNullOrEmpty()) return emptyList()
+        val results = getJson(body, Entities::class.java)?.results ?: return emptyList()
+        return results.filter { (it.media_type == "movie" || it.media_type == "tv") && it.id != null }
+            .onEach { fixEntity(it) }
+    }
+
     fun video(endpoint: String): Entity? {
         val appLang = getLang()
         return videoDetail(endpoint, appLang)
     }
 
     private fun videoDetail(endpoint: String, lang: String = ""): Entity? {
-        val apiUrl = App.context.tmdbApiUrl
-        val apiUri = apiUrl.toUri()
-        // Manually handle the authority part to prevent encoding of the port colon
-        val authority = "${apiUri.host}${if (apiUri.port != -1) ":${apiUri.port}" else ""}"
-        val basePath = apiUri.path?.removeSuffix("/") ?: "3"
-        val urlBuilder = Uri.Builder()
-            .scheme(apiUri.scheme)
-            .encodedAuthority(authority)  // Use encodedAuthority instead of authority to prevent double encoding
-            .path("$basePath/$endpoint")
         // key must be 1st
         val params = mutableMapOf<String, String>()
         params["api_key"] = APIKEY
@@ -221,34 +242,7 @@ object TMDB {
         else params["language"] = lang
         params["append_to_response"] = "videos,images,alternative_titles"
         params["include_image_language"] = "${getLang()},ru,en,null"
-        for (param in params) {
-            urlBuilder.appendQueryParameter(param.key, param.value)
-        }
-        if (apiUrl != APIURL)
-        // Add all original query parameters
-            apiUri.queryParameterNames.forEach { paramName ->
-                apiUri.getQueryParameter(paramName)?.let { paramValue ->
-                    urlBuilder.appendQueryParameter(paramName, paramValue)
-                }
-            }
-
-        var body: String? = null
-        val link = urlBuilder.build().toString()
-        // debugLog("TMDB videoDetail($endpoint) apiUri[$apiUri] link[$link]")
-        try {
-            val request = Request.Builder()
-                .url(link)
-                .build()
-            val client = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
-                startWithQuad9DNS() else permissiveOkHttp()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("Unexpected code $response")
-                body = response.body()?.string()
-                response.body()?.close()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        val body = getBody(endpoint, params)
         // debugLog("TMDB body: $body")
         if (body.isNullOrEmpty())
             return null

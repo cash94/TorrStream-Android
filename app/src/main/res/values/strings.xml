@@ -232,4 +232,9 @@
     <string name="back_key_reserved">%1$s is used for something else. Press another button.</string>
     <string name="back_key_already">%1$s already works as “Back”.</string>
     <string name="back_key_saved">Saved: %1$s. This button now works as “Back”.</string>
+    <!-- Глобальный поиск Android TV (search/SearchProvider) -->
+    <string name="global_search_movie">Movie</string>
+    <string name="global_search_series">Series</string>
+    <string name="global_search_hint">Movies and series</string>
+    <string name="global_search_settings">Movies and series from TMDB in TorrStream</string>
 </resources>

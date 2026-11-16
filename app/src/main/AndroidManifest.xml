@@ -120,6 +120,16 @@
                 <data android:pathPattern="/movie/.*" />
                 <data android:pathPattern="/tv/.*" />
             </intent-filter>
+            <!-- «Найди … в TorrStream»: запрос в SearchManager.QUERY открывает поиск в вебе;
+                 выбор из глобального поиска Android TV — интент GLOBALSEARCH (res/xml/searchable.xml) -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEARCH" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.searchable"
+                android:resource="@xml/searchable" />
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
 
@@ -187,6 +197,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- Результаты для глобального поиска Android TV; читать их может только системный поиск -->
+        <provider
+            android:name=".search.SearchProvider"
+            android:authorities="my.torrstream.app.atvsearch"
+            android:exported="true"
+            android:readPermission="android.permission.GLOBAL_SEARCH" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.update_provider"

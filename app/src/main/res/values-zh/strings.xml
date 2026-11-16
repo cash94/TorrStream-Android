@@ -225,4 +225,8 @@
     <string name="back_key_reserved">%1$s 已用于其他操作，请按其他按键。</string>
     <string name="back_key_already">%1$s 已经可以作为“返回”。</string>
     <string name="back_key_saved">已保存：%1$s。此按键现在作为“返回”。</string>
+    <string name="global_search_movie">电影</string>
+    <string name="global_search_series">剧集</string>
+    <string name="global_search_hint">电影和剧集</string>
+    <string name="global_search_settings">TorrStream 中来自 TMDB 的电影和剧集</string>
 </resources>

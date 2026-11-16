@@ -1109,24 +1109,12 @@ class MainActivity : BaseActivity(),
                 "open_settings" -> showMenuDialog()
             }
         }
-        // Handle an external search query (e.g. from a voice assistant or a
-        // launcher): open LAMPA's own search screen prefilled with the query
-        // via the public Lampa.Search API. If a search screen is already open
-        // (a repeated external query), close it first — Lampa.Search.open() is
-        // not idempotent and would stack a new search over the previous one.
-        // runVoidJsFunc queues the call until the web app is ready, so a cold
-        // start is fine.
+        // Запрос извне («Найди Аватар в TorrStream» у ассистента, ACTION_SEARCH):
+        // открываем поиск TorrStream с этим запросом
         intent.getStringExtra(SearchManager.QUERY)?.let { query ->
-            if (query.isNotBlank()) {
-                val escaped = query.replace("\\", "\\\\").replace("'", "\\'")
-                val opener = "(function(q){" +
-                        "if(!window.Lampa||!Lampa.Search)return;" +
-                        "try{if(document.body&&document.body.classList" +
-                        ".contains('search--open'))Lampa.Search.close();}catch(e){}" +
-                        "Lampa.Search.open({input:q});" +
-                        "})"
-                runVoidJsFunc(opener, "'$escaped'")
-            }
+            // processIntent зовётся на каждой загрузке страницы — поиск один раз
+            intent.removeExtra(SearchManager.QUERY)
+            if (query.isNotBlank()) openWebSearch(query.trim())
         }
         // Fix initial focus
         browser?.setFocus()
@@ -1150,7 +1138,7 @@ class MainActivity : BaseActivity(),
             }
         }
         if (intent.action == "GLOBALSEARCH") {
-            handleGlobalSearch(intent, uri, delay)
+            handleGlobalSearch(intent, uri)
         }
     }
 
@@ -1171,14 +1159,66 @@ class MainActivity : BaseActivity(),
         }
     }
 
-    // Helper function to handle global search
-    // content://top.rootu.lampa.atvsearch/video/508883#Intent;action=GLOBALSEARCH
-    private fun handleGlobalSearch(intent: Intent, uri: Uri, delay: Long = 0) {
-        val sid = uri.lastPathSegment // Keep as String
-        val videoType = intent.extras?.getString(SearchManager.EXTRA_DATA_KEY) ?: ""
-        // Handle global search case
-        if (videoType in listOf("movie", "tv") && sid?.toIntOrNull() != null)
-            handleTmdbIntent(intent, videoType, sid, delay) // Pass id as String
+    // Выбор из глобального поиска Android TV (search/SearchProvider):
+    // data = content://my.torrstream.app.atvsearch/video/<tmdb id>, в EXTRA_DATA_KEY —
+    // JSON {media_type, title, poster} (или просто "movie"/"tv")
+    private fun handleGlobalSearch(intent: Intent, uri: Uri) {
+        val sid = uri.lastPathSegment?.takeIf { it.toIntOrNull() != null }
+        val extra = intent.getStringExtra(SearchManager.EXTRA_DATA_KEY).orEmpty()
+        // Страница может перезагрузиться, а processIntent зовётся на каждой загрузке:
+        // карточка должна открыться один раз
+        intent.action = Intent.ACTION_MAIN
+        intent.data = null
+        intent.removeExtra(SearchManager.EXTRA_DATA_KEY)
+        sid ?: return
+        val info = try {
+            JSONObject(extra)
+        } catch (e: JSONException) {
+            JSONObject().put("media_type", extra)
+        }
+        val type = info.optString("media_type")
+        if (type !in listOf("movie", "tv")) return
+        val card = JSONObject().apply {
+            put("id", sid)
+            put("media_type", type)
+            put("title", info.optString("title"))
+            put("poster", info.optString("poster"))
+        }
+        openCardOverHome(card.toString())
+    }
+
+    /** Экран поиска TorrStream с запросом [query] — как будто его ввели в строку и нажали «Поиск». */
+    private fun openWebSearch(query: String) {
+        val q = JSONObject.quote(query).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+        val opener = "(function(q){" +
+                "var readyTries=0,rowsTries=0;" +
+                "function ready(){return window.HomeScreen&&window.Nav&&window.AppState&&" +
+                "typeof window.showSearchResults==='function'&&typeof window.searchTorrents==='function';}" +
+                "function open(){" +
+                "if(!ready()){if(++readyTries<150)setTimeout(open,200);return;}" +
+                // Ждём ряды главной: на неё вернёт «Назад» из поиска
+                "var st=HomeScreen.state;" +
+                "if(st&&!st.built&&++rowsTries<75){setTimeout(open,200);return;}" +
+                "var input=document.getElementById('search-query');" +
+                "if(!input)return;" +
+                "if(AppState.currentScreen!=='search'){" +
+                // Карточку под поиском закрываем: «Назад» из поиска ведёт на главную
+                "if(AppState.currentScreen!=='home'){" +
+                "if(typeof window.hideDetailView==='function')window.hideDetailView();" +
+                "HomeScreen.show({restoreFocus:false});}" +
+                "Nav.reset('home');" +
+                "if(typeof HomeScreen.stopTrailer==='function')HomeScreen.stopTrailer();}" +
+                // Свободный поиск: снимаем замок и контекст карточки каталога
+                "if(typeof window.setSearchLocked==='function')window.setSearchLocked(false);" +
+                "if(typeof window.clearCatalogSearchContext==='function')window.clearCatalogSearchContext();" +
+                "input.value=q;" +
+                "if(AppState.currentScreen!=='search')window.showSearchResults({focusQuery:false});" +
+                "window.searchTorrents(q);" +
+                "}" +
+                "open();" +
+                "})"
+        logDebug("openWebSearch $query")
+        runVoidJsFunc(opener, q)
     }
 
     private fun handleContinueWatch(intent: Intent, delay: Long = 0) {

@@ -228,4 +228,8 @@
     <string name="back_key_reserved">%1$s занята другим действием. Нажмите другую кнопку.</string>
     <string name="back_key_already">%1$s уже работает как «Назад».</string>
     <string name="back_key_saved">Запомнено: %1$s. Теперь эта кнопка работает как «Назад».</string>
+    <string name="global_search_movie">Фильм</string>
+    <string name="global_search_series">Сериал</string>
+    <string name="global_search_hint">Фильмы и сериалы</string>
+    <string name="global_search_settings">Фильмы и сериалы из TMDB в TorrStream</string>
 </resources>
