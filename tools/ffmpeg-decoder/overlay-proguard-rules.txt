@@ -1,0 +1,33 @@
+# Proguard rules specific to the FFmpeg extension.
+# (TorrStream: stock rules of Media3 1.11.1 plus the video decoder.)
+
+# This prevents the names of native methods from being obfuscated. The classes are
+# found by name in JNI_OnLoad and their natives bound with RegisterNatives.
+-keep,includedescriptorclasses class androidx.media3.decoder.ffmpeg.** {
+    native <methods>;
+}
+
+# This method is called from native code
+-keep, includedescriptorclasses class androidx.media3.decoder.ffmpeg.FfmpegAudioDecoder {
+  private java.nio.ByteBuffer growOutputBuffer(androidx.media3.decoder.SimpleDecoderOutputBuffer, int);
+}
+
+# Fields and methods used by name from the video JNI (GetFieldID/GetMethodID)
+-keep class androidx.media3.decoder.VideoDecoderOutputBuffer {
+  java.nio.ByteBuffer data;
+  int width;
+  int height;
+  int yStride;
+  int uvStride;
+  int colorspace;
+  boolean initForYuvFrame(int, int, int, int, int);
+}
+
+-keep class androidx.media3.decoder.DecoderOutputBuffer {
+  long timeUs;
+}
+
+# Created by DefaultRenderersFactory through reflection
+-keepclassmembers class androidx.media3.decoder.ffmpeg.ExperimentalFfmpegVideoRenderer {
+  <init>(long, android.os.Handler, androidx.media3.exoplayer.video.VideoRendererEventListener, int);
+}

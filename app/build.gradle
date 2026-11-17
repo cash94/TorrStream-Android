@@ -49,6 +49,8 @@ android {
         multiDexEnabled = true // required when setting minSdkVersion to 20 or lower
         // Use SupportLibrary for vectors
         vectorDrawables.useSupportLibrary = true
+        // Тесты на устройстве/эмуляторе: разборщики Media3 на чистой JVM не работают (SparseArray)
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -189,8 +191,12 @@ dependencies {
     // FFmpeg-расширение Media3 собираем сами (tools/ffmpeg-decoder/build.sh): в Maven его нет,
     // а сборка Jellyfin отстаёт на несколько версий. Версия AAR обязана совпадать с
     // media3Version — при обновлении Media3 пересобрать скриптом. FFmpeg в нём — LGPL-2.1
-    // (без --enable-gpl), только декодеры звука.
+    // (без --enable-gpl): декодеры звука и программное видео (MPEG-4 Part 2, MS-MPEG4, VC-1,
+    // MPEG-1/2, MJPEG) — рабочий ExperimentalFfmpegVideoRenderer из tools/ffmpeg-decoder/overlay.
     implementation files("libs/lib-decoder-ffmpeg-${media3Version}.aar")
+    // AV1-расширение Media3 (Libdav1dVideoRenderer, dav1d — BSD-2) — тоже своя сборка
+    // (tools/av1-decoder/build.sh): AV1 до 1080p там, где у устройства AV1 нет вовсе.
+    implementation files("libs/lib-decoder-av1-${media3Version}.aar")
     // Запасной движок встроенного плеера (player/VlcPlayer.kt): свои декодеры FFmpeg для
     // того, что не тянут декодеры устройства, — AVI с XviD/DivX, WMV, старый MPEG-4.
     // LGPL-2.1+. 3.6.x — последняя ветка без зависимости от Kotlin 2.x.
@@ -231,6 +237,8 @@ dependencies {
     implementation "com.airbnb.android:lottie:$lottieVersion"
     implementation 'info.guardianproject.netcipher:netcipher:2.1.0' // SSL / TLS
     implementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     implementation 'org.conscrypt:conscrypt-android:2.5.3' // for TLS v1.3 on API < 29
     //noinspection GradleDependency 1.8.1 fails on build with old gradle
     implementation 'org.mozilla:rhino:1.7.15' // JavaScript to run PAC file to get correct proxies

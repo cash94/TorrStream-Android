@@ -3,6 +3,7 @@
 *.aar
 # Своя сборка FFmpeg-расширения Media3 (tools/ffmpeg-decoder/build.sh) — в репозитории
 !app/libs/lib-decoder-ffmpeg-*.aar
+!app/libs/lib-decoder-av1-*.aar
 *.ap_
 *.aab
 

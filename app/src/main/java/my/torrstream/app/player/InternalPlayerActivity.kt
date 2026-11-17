@@ -80,9 +80,16 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.DecoderCounters
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
+import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
+import androidx.media3.exoplayer.video.VideoRendererEventListener
+import androidx.media3.decoder.ffmpeg.ExperimentalFfmpegVideoRenderer
+import androidx.media3.decoder.ffmpeg.FfmpegLibrary
+import androidx.media3.decoder.av1.Libdav1dVideoRenderer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
@@ -156,6 +163,15 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         /** Сколько раз за запуск плеер продолжает с того же места после порченых данных потока. */
         private const val MAX_STREAM_RESTARTS = 3
+
+        /** Перезапуск после порчи не ушёл дальше этого — значит, упёрлись в то же место. */
+        private const val STREAM_PROGRESS_MS = 5_000L
+
+        /** Шаг, на который перезапуск перепрыгивает место, где поток портится раз за разом. */
+        private const val STREAM_SKIP_STEP_MS = 10_000L
+
+        /** Порча данных ближе этого к концу файла — конец серии. */
+        private const val END_DATA_ERROR_SLACK_MS = 15_000L
 
         /** Сколько ждать, пока декодер отпустит картинку при сворачивании (по умолчанию 2 с). */
         private const val DETACH_SURFACE_TIMEOUT_MS = 6_000L
@@ -249,6 +265,13 @@ class InternalPlayerActivity : AppCompatActivity() {
         private const val BACK_EXIT_MS = 2_000L
 
         private val MPEG4_PART2_MIMES = setOf(MimeTypes.VIDEO_MP4V, MimeTypes.VIDEO_DIVX, MimeTypes.VIDEO_H263)
+
+        /**
+         * Программное видео FFmpeg — только до 1080p: больше на процессоре ТВ не успевает
+         * (см. [hardwareOnlyFormat]), такую дорожку рендерер FFmpeg объявляет неподдерживаемой.
+         */
+        private const val SOFTWARE_VIDEO_MAX_WIDTH = 1920
+        private const val SOFTWARE_VIDEO_MAX_HEIGHT = 1088
 
         /** Кодеки, которые больше 1080p без аппаратного декодера не идут ни в чём, см. [hardwareOnlyFormat]. */
         private val HARDWARE_ONLY_CODECS = mapOf(
@@ -356,6 +379,9 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     /** Перезапуски с того же места после ошибки данных посреди просмотра, см. onPlayerError. */
     private var streamRestarts = 0
+
+    /** С какой позиции был последний такой перезапуск (-1 — не было): продвинулись ли после него. */
+    private var lastStreamRestartAt = -1L
     private val startedAt = SystemClock.elapsedRealtime()
 
     /** Set when the player is rebuilt (buffer change) so playback resumes where it left off. */
@@ -747,14 +773,15 @@ class InternalPlayerActivity : AppCompatActivity() {
     /**
      * Renderers wired to the user's decoder choice.
      *
-     * Worth knowing what "software" can and cannot reach: the bundled FFmpeg extension decodes
-     * audio only — it ships no video decoder — so software video means Android's own
-     * `c2.android.*` MediaCodec decoders. Those are what usually rescue an AVI carrying
-     * MPEG-4 Part 2 (DivX/Xvid) on a device whose hardware decoder rejects it.
+     * Worth knowing what "software" can and cannot reach: software video is Android's own
+     * `c2.android.*` MediaCodec decoders (H.264, HEVC, VP8/9, AV1) plus the bundled FFmpeg
+     * extension for MPEG-4 Part 2 (DivX/Xvid), H.263, MS-MPEG4, VC-1/WMV3, MPEG-1/2 and MJPEG
+     * up to 1080p — the Android MPEG-4 decoder stops at 352×288.
      */
     private fun buildRenderersFactory(): DefaultRenderersFactory {
         val audioMode = audioMode
         val audioLimit = audioLimit
+        val videoMode = if (softwareVideoFallback) Prefs.DECODER_SOFTWARE else playerDecoderMode
         val factory = object : DefaultRenderersFactory(this) {
             // Режим «Вывод звука»: PCM или битстрим решает выход, а не рендерер — рендерер
             // сам переходит на декодер, когда выход формат как есть не берёт.
@@ -765,6 +792,45 @@ class InternalPlayerActivity : AppCompatActivity() {
             ): AudioSink? = AudioOutput.buildExoAudioSink(
                 context, audioMode, audioLimit, enableFloatOutput, enableAudioTrackPlaybackParams,
             ) ?: super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+
+            // Программное видео FFmpeg (MPEG-4 Part 2, VC-1, MPEG-2, MJPEG — см.
+            // tools/ffmpeg-decoder): место в списке задаёт режим декодера видео, а не режим
+            // расширений — тот откат звука переключает на PREFER, и видео бы ушло с железа
+            override fun buildVideoRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                eventHandler: Handler,
+                eventListener: VideoRendererEventListener,
+                allowedVideoJoiningTimeMs: Long,
+                out: ArrayList<Renderer>,
+            ) {
+                super.buildVideoRenderers(
+                    context, extensionRendererMode, mediaCodecSelector, enableDecoderFallback,
+                    eventHandler, eventListener, allowedVideoJoiningTimeMs, out,
+                )
+                out.removeAll { it is ExperimentalFfmpegVideoRenderer || it is Libdav1dVideoRenderer }
+                if (videoMode == Prefs.DECODER_HARDWARE) return
+                val dropped = DefaultRenderersFactory.MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY
+                val software = listOf(
+                    ExperimentalFfmpegVideoRenderer(
+                        allowedVideoJoiningTimeMs, eventHandler, eventListener, dropped,
+                        Runtime.getRuntime().availableProcessors(),
+                        SOFTWARE_VIDEO_MAX_WIDTH, SOFTWARE_VIDEO_MAX_HEIGHT,
+                    ),
+                    // AV1 — dav1d (tools/av1-decoder), до 1080p и 8 бит
+                    SoftwareAv1Renderer(
+                        allowedVideoJoiningTimeMs, eventHandler, eventListener, dropped,
+                        SOFTWARE_VIDEO_MAX_WIDTH, SOFTWARE_VIDEO_MAX_HEIGHT,
+                    ),
+                )
+                val mediaCodec = out.indexOfFirst { it is MediaCodecVideoRenderer }
+                    .takeIf { it >= 0 } ?: out.size
+                // «Программный»: FFmpeg раньше MediaCodec (у c2.android.mpeg4 предел 352×288);
+                // «Совмещённый»: только когда MediaCodec формат не берёт
+                out.addAll(if (videoMode == Prefs.DECODER_SOFTWARE) mediaCodec else mediaCodec + 1, software)
+            }
 
             // Тот же рендерер MediaCodec, но AAC Main/SSR/LTP, которых декодер устройства не
             // заявляет, он отдаёт FFmpeg (AacProfileAudioRenderer)
@@ -792,8 +858,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             }
         }
         Log.i(TAG, "Audio output mode $audioMode, limit $audioLimit")
-        val mode = if (softwareVideoFallback) Prefs.DECODER_SOFTWARE else playerDecoderMode
-        val configured = when (mode) {
+        val configured = when (videoMode) {
             Prefs.DECODER_HARDWARE -> factory
                 .setEnableDecoderFallback(false)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
@@ -814,7 +879,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         }
         // Откат звука: FFmpeg первым — у него нет своих причуд с выходом, как у декодеров
-        // Dolby/DTS в прошивках. Видео это не касается: видеодекодеров в FFmpeg-модуле нет.
+        // Dolby/DTS в прошивках. Видео это не касается: его FFmpeg ставит buildVideoRenderers.
         return if (safeAudioFallback) {
             configured
                 .setEnableDecoderFallback(true)
@@ -1113,8 +1178,9 @@ class InternalPlayerActivity : AppCompatActivity() {
      * position, so the change lands on what is playing rather than waiting for the next file —
      * which is the point of reaching for these mid-film.
      */
-    private fun restartPlayer(what: String) {
+    private fun restartPlayer(what: String, startAtMs: Long? = null) {
         rememberResumePoint()
+        if (startAtMs != null) resumePositionMs = startAtMs
 
         // Отсчёт автопропуска и автоскрытие кнопки живут на handler — без этого
         // кнопка осталась бы висеть с замершим отсчётом
@@ -1369,7 +1435,12 @@ class InternalPlayerActivity : AppCompatActivity() {
         if (size != null && size.width > 0 && size.height > 0 && screenW > 0 && screenH > 0 &&
             videoScale != VideoScale.FILL
         ) {
-            val pixelRatio = size.pixelWidthHeightRatio.takeIf { it > 0f } ?: 1f
+            // Рендерер FFmpeg (DecoderVideoRenderer) сообщает размер без формы пикселя, а у
+            // DVD-MPEG-2 и части XviD пиксель не квадратный — она есть в формате дорожки
+            val formatRatio = (player as? ExoPlayer)?.videoFormat
+                ?.takeIf { it.rotationDegrees == 0 }?.pixelWidthHeightRatio
+            val pixelRatio = size.pixelWidthHeightRatio.takeIf { it > 0f && it != 1f }
+                ?: formatRatio?.takeIf { it > 0f } ?: 1f
             val videoW = size.width * pixelRatio
             val videoH = size.height.toFloat()
             val fit = min(screenW / videoW, screenH / videoH)
@@ -1876,6 +1947,21 @@ class InternalPlayerActivity : AppCompatActivity() {
             return
         }
         hideSkipButton()
+    }
+
+    /**
+     * Серия досмотрена, хоть плеер и остановился на ошибке (порча в самом конце файла): как
+     * обычное окончание — следующая серия или выход «досмотрено».
+     */
+    private fun finishAsCompleted() {
+        val p = player
+        if (p != null && autoNext && p.hasNextMediaItem()) {
+            p.seekToNextMediaItem()
+            p.prepare()
+        } else {
+            endedByCompletion = true
+            finish()
+        }
     }
 
     // endregion
@@ -2885,6 +2971,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 // Без автопереключения серий ExoPlayer встаёт в конце серии, а не уходит на
                 // следующую: плеер закроется на ней же (onPlayWhenReadyChanged)
                 exo.pauseAtEndOfMediaItems = !autoNext
+                exo.addAnalyticsListener(videoDecoderLog)
                 ass.attach(exo) { handler.post { restartPlayer("ASS in the preloaded item") } }
                 assSubtitles = ass
             }
@@ -3043,6 +3130,11 @@ class InternalPlayerActivity : AppCompatActivity() {
             updateEpisodeButtons()
             // New episode, new timings: drop what we had and re-query.
             skipFetchedForIndex = -1
+            // Позиция прошлого перезапуска после порчи — из другой серии (пересборка плеера
+            // приходит как PLAYLIST_CHANGED — та же серия, её не считаем)
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK
+            ) lastStreamRestartAt = -1L
             skipRanges = emptyList()
             offeredSkipKeys.clear()
             hideSkipButton()
@@ -3112,7 +3204,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                 !videoFallbackTried &&
                 playerDecoderMode == Prefs.DECODER_COMBINED &&
                 error.isVideoFailure() &&
-                !error.isMpeg4Part2() &&
+                !error.isMpeg4Part2WithoutSoftware() &&
                 !error.isAboveFullHd()
             ) {
                 reportDiagnostics(PlaybackDiagnostics.KIND_SOFTWARE_VIDEO, "hardware video decoder failed", error)
@@ -3158,13 +3250,33 @@ class InternalPlayerActivity : AppCompatActivity() {
             // Посреди просмотра разборщик получил не те байты («No valid varint length mask
             // found» в MKV, сбой HTTP-клиента системы): так бывает, когда TorrServer не успевает
             // за потоком. Файл при этом цел — новый разборщик найдёт ближайший кластер по
-            // индексу и запросит данные заново. Раньше плеер на этом закрывался (3 отчёта)
+            // индексу и запросит данные заново. Раньше плеер на этом закрывался (3 отчёта).
+            // Порча в последние секунды файла — это конец серии, а не повод перезапускаться
+            // в ту же точку и закрываться («Нейровася» E05: сбой на 1425,9 с из 1425,9 с)
+            if (!usingVlc && error.isMidStreamDataError() && lastDuration - lastPosition <= END_DATA_ERROR_SLACK_MS) {
+                reportDiagnostics(PlaybackDiagnostics.KIND_STREAM_RESTART, "stream data error at the end (${lastPosition / 1000}s of ${lastDuration / 1000}s), finished", error)
+                Log.w(TAG, "Stream data error ${lastDuration - lastPosition}ms before the end, treating as finished")
+                handler.post { finishAsCompleted() }
+                return
+            }
             if (!usingVlc && streamRestarts < MAX_STREAM_RESTARTS && error.isMidStreamDataError()) {
-                reportDiagnostics(PlaybackDiagnostics.KIND_STREAM_RESTART, "stream data error at ${lastPosition / 1000}s, restart #${streamRestarts + 1}", error)
+                // Прошлый перезапуск не продвинулся — порча на этом месте не проходит: дальше
+                // не в ту же точку, а с шагом вперёд (+10 с, +20 с)
+                val stuck = lastStreamRestartAt >= 0 && lastPosition <= lastStreamRestartAt + STREAM_PROGRESS_MS
+                val startAt = if (stuck) {
+                    (lastPosition + STREAM_SKIP_STEP_MS * streamRestarts).coerceAtMost(lastDuration - END_DATA_ERROR_SLACK_MS)
+                } else null
+                reportDiagnostics(
+                    PlaybackDiagnostics.KIND_STREAM_RESTART,
+                    "stream data error at ${lastPosition / 1000}s, restart #${streamRestarts + 1}" +
+                            (startAt?.let { " from ${it / 1000}s" } ?: ""),
+                    error,
+                )
                 streamRestarts++
-                Log.w(TAG, "Stream data error mid-playback, restarting at ${lastPosition}ms: ${error.errorCodeName}")
+                lastStreamRestartAt = startAt ?: lastPosition
+                Log.w(TAG, "Stream data error mid-playback, restarting at ${startAt ?: lastPosition}ms: ${error.errorCodeName}")
                 App.toast(R.string.player_stream_restart, false)
-                handler.post { restartPlayer("stream restart") }
+                handler.post { restartPlayer("stream restart", startAt) }
                 return
             }
 
@@ -3214,10 +3326,6 @@ class InternalPlayerActivity : AppCompatActivity() {
                     .takeIf { it.isNotBlank() }
             }
 
-        /**
-         * MPEG-4 Part 2 (XviD/DivX). Программный декодер Android для него рассчитан максимум
-         * на 352×288, так что откат на него ничего не даёт — сразу в libVLC.
-         */
         private fun PlaybackException.isSurfaceDetachTimeout(): Boolean {
             if (errorCode != PlaybackException.ERROR_CODE_TIMEOUT) return false
             var cause: Throwable? = this
@@ -3251,8 +3359,16 @@ class InternalPlayerActivity : AppCompatActivity() {
             return format.width > 1920 || format.height > 1088
         }
 
-        private fun PlaybackException.isMpeg4Part2(): Boolean =
-            (this as? ExoPlaybackException)?.rendererFormat?.sampleMimeType in MPEG4_PART2_MIMES
+        /**
+         * MPEG-4 Part 2 (XviD/DivX), который не берёт и FFmpeg-модуль. Программный декодер
+         * Android для него рассчитан максимум на 352×288, так что откат на него ничего не даёт —
+         * сразу в libVLC. С FFmpeg (до 1080p) программный откат — и есть спасение, когда
+         * аппаратный MPEG-4 спотыкается посреди файла.
+         */
+        private fun PlaybackException.isMpeg4Part2WithoutSoftware(): Boolean {
+            val mime = (this as? ExoPlaybackException)?.rendererFormat?.sampleMimeType ?: return false
+            return mime in MPEG4_PART2_MIMES && !FfmpegLibrary.supportsFormat(mime)
+        }
 
         private fun PlaybackException.isVlcWorthTrying(): Boolean =
             isDecoderError() || isVideoFailure() || errorCode in setOf(
@@ -3306,6 +3422,32 @@ class InternalPlayerActivity : AppCompatActivity() {
         resumeIndex = p.currentMediaItemIndex
         resumePositionMs = p.currentPosition.coerceAtLeast(0L)
         resumeTrackParams = p.trackSelectionParameters
+    }
+
+    /**
+     * Каким декодером идёт видео (MediaCodec или программный FFmpeg) и сколько кадров он
+     * потерял — в logcat, для разбора «тормозит» и отчётов.
+     */
+    private val videoDecoderLog = object : AnalyticsListener {
+        override fun onVideoDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime,
+            decoderName: String,
+            initializedTimestampMs: Long,
+            initializationDurationMs: Long,
+        ) {
+            Log.i(TAG, "Video decoder: $decoderName")
+        }
+
+        override fun onVideoDisabled(eventTime: AnalyticsListener.EventTime, decoderCounters: DecoderCounters) {
+            decoderCounters.ensureUpdated()
+            Log.i(
+                TAG,
+                "Video frames: rendered ${decoderCounters.renderedOutputBufferCount}, " +
+                        "dropped ${decoderCounters.droppedBufferCount}, " +
+                        "skipped ${decoderCounters.skippedOutputBufferCount}, " +
+                        "max consecutive dropped ${decoderCounters.maxConsecutiveDroppedBufferCount}",
+            )
+        }
     }
 
     private fun releasePlayer() {
