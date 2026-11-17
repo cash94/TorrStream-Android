@@ -10,6 +10,9 @@ import androidx.media3.extractor.ExtractorInput
 import androidx.media3.extractor.ExtractorOutput
 import androidx.media3.extractor.PositionHolder
 import androidx.media3.extractor.SniffFailure
+import androidx.media3.extractor.mkv.MatroskaExtractor
+import java.lang.reflect.Field
+import java.lang.reflect.Method
 
 /**
  * MKV с повреждённым местом: пропустить его до следующего кластера, а не обрывать фильм.
@@ -26,6 +29,18 @@ import androidx.media3.extractor.SniffFailure
  * принимается за начало кластера.
  * Ищем не дальше [MAX_SCAN_BYTES]; не нашли — ошибка уходит дальше, как раньше (там её
  * ждёт перезапуск плеера).
+ *
+ * По отчётам 1.1.31–1.1.32 к этому добавлено:
+ * - **Испорченный индекс (Cues).** Разборщик отдаёт форматы дорожек только после индекса, а
+ *   индекс обычно в конце файла — за ним кластеров нет, и поиск кластера ничего не давал:
+ *   плеер закрывался на старте или при продолжении просмотра, без единой дорожки («Художник»,
+ *   «Тверская», «Другие», «Нейровася» — 9 отчётов). Теперь индекс закрывается на том, что
+ *   успели прочитать ([finishDamagedCues]), и разборщик возвращается к первому кластеру. Перемотка
+ *   работает по уцелевшей части индекса; не уцелело ничего — фильм идёт без перемотки.
+ * - **Мусор в конце файла.** Порча после последнего кластера («Нейровася» E05 — на последней
+ *   секунде) — это конец фильма: поток завершается, и плеер переходит к следующей серии.
+ * - **«Top bit not zero»** — испорчена длина NAL внутри кадра (7 отчётов): тот же пропуск до
+ *   следующего кластера.
  */
 @OptIn(UnstableApi::class)
 class MatroskaResyncExtractor(private val delegate: Extractor) : Extractor {
@@ -41,25 +56,88 @@ class MatroskaResyncExtractor(private val delegate: Extractor) : Extractor {
     override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int = try {
         delegate.read(input, seekPosition)
     } catch (e: ParserException) {
-        resync(input, e)
+        recover(input, seekPosition, e)
     } catch (e: IllegalStateException) {
-        if (e.message?.contains("varint", ignoreCase = true) != true) throw e
-        resync(input, e)
+        if (!isDamagedData(e)) throw e
+        recover(input, seekPosition, e)
     }
 
-    private fun resync(input: ExtractorInput, error: Exception): Int {
+    private fun recover(input: ExtractorInput, seekPosition: PositionHolder, error: Exception): Int {
         if (resyncs >= MAX_RESYNCS) throw error
+
+        // Сломался индекс — закрыть его на прочитанном и вернуться туда, откуда за ним прыгнули
+        finishDamagedCues(error)?.let { back ->
+            resyncs++
+            if (back != C.INDEX_UNSET.toLong()) {
+                delegate.seek(back, C.TIME_UNSET)
+                seekPosition.position = back
+                return Extractor.RESULT_SEEK
+            }
+            // Индекс стоял перед кластерами — дальше обычный поиск первого кластера
+        }
+
         val from = input.position
-        if (!skipToNextCluster(input)) throw error
-        resyncs++
-        Log.w(TAG, "Damaged data at $from (${error.message}), resumed at cluster ${input.position}, #$resyncs")
-        // Состояние разборщика — на начало кластера: блок, элемент, недописанный кадр
-        delegate.seek(input.position, C.TIME_UNSET)
-        return Extractor.RESULT_CONTINUE
+        return when (skipToNextCluster(input)) {
+            Scan.FOUND -> {
+                resyncs++
+                Log.w(TAG, "Damaged data at $from (${error.message}), resumed at cluster ${input.position}, #$resyncs")
+                // Состояние разборщика — на начало кластера: блок, элемент, недописанный кадр
+                delegate.seek(input.position, C.TIME_UNSET)
+                Extractor.RESULT_CONTINUE
+            }
+            Scan.END_OF_FILE -> {
+                Log.w(TAG, "Damaged data at $from (${error.message}) up to the end of file, finishing")
+                // Разборщик дочитает пустой хвост: допишет последний кадр и сообщит о конце
+                delegate.seek(input.position, C.TIME_UNSET)
+                try {
+                    delegate.read(input, seekPosition)
+                } catch (e: Exception) {
+                    throw error
+                }
+            }
+            Scan.NOT_FOUND -> throw error
+        }
     }
 
-    /** Пропустить вход до следующего кластера; false — не нашли (конец файла или лимит). */
-    private fun skipToNextCluster(input: ExtractorInput): Boolean {
+    /**
+     * Ошибка пришлась на индекс (Cues), который разборщик читает до выдачи форматов дорожек:
+     * закрыть индекс на уже прочитанных точках — разборщик отдаст карту перемотки и форматы.
+     *
+     * Возвращает null — ошибка не в индексе; [C.INDEX_UNSET] — индекс закрыт, читать дальше
+     * по порядку; иначе — место, откуда разборщик прыгнул за индексом (вернуться туда).
+     *
+     * Поля и метод MatroskaExtractor закрытые — через рефлексию (Media3 1.11.1, сборка без R8).
+     * Не нашлись (другая версия Media3) — как раньше, обычный поиск кластера.
+     */
+    private fun finishDamagedCues(error: Exception): Long? {
+        val mkv = delegate as? MatroskaExtractor ?: return null
+        val inCues = IN_CUES_ELEMENT ?: return null
+        val sentSeekMap = SENT_SEEK_MAP ?: return null
+        val endMaster = END_MASTER_ELEMENT ?: return null
+        val seekBack = SEEK_AFTER_CUES ?: return null
+        return try {
+            if (sentSeekMap.getBoolean(mkv)) return null
+            // Внутри индекса — или разборщик прыгнул за ним, а испорчен уже его заголовок
+            val cuesTrip = seekBack.getLong(mkv) != C.INDEX_UNSET.toLong()
+            if (!inCues.getBoolean(mkv) && !cuesTrip) return null
+            // Закрытие Cues строит карту перемотки из прочитанных точек (нет ни одной —
+            // фильм без перемотки) и отдаёт форматы дорожек; assertInCues там не проверяется
+            endMaster.invoke(mkv, ID_CUES)
+            val back = seekBack.getLong(mkv)
+            // Возврат делаем сами: разборщик сделал бы его только после ещё одного элемента
+            seekBack.setLong(mkv, C.INDEX_UNSET.toLong())
+            Log.w(TAG, "Damaged Cues (${error.message}), using the part read so far; back to $back")
+            back
+        } catch (e: ReflectiveOperationException) {
+            Log.w(TAG, "Cannot finish damaged Cues", e)
+            null
+        }
+    }
+
+    private enum class Scan { FOUND, END_OF_FILE, NOT_FOUND }
+
+    /** Пропустить вход до следующего кластера. */
+    private fun skipToNextCluster(input: ExtractorInput): Scan {
         val buffer = ByteArray(WINDOW_BYTES)
         var scanned = 0L
         while (scanned < MAX_SCAN_BYTES) {
@@ -74,16 +152,23 @@ class MatroskaResyncExtractor(private val delegate: Extractor) : Extractor {
             for (i in 0..filled - CLUSTER_ID.size) {
                 if (matchesCluster(buffer, i, filled)) {
                     input.skipFully(i)
-                    return true
+                    return Scan.FOUND
                 }
             }
-            if (filled < buffer.size) return false // конец файла
+            if (filled < buffer.size) {
+                // Поток кончился. Это конец файла, только если дошли до его длины: оборванное
+                // соединение — не повод заканчивать фильм, пусть плеер переоткроет поток
+                val length = input.length
+                if (length == C.LENGTH_UNSET.toLong() || input.position + filled < length) return Scan.NOT_FOUND
+                input.skipFully(filled)
+                return Scan.END_OF_FILE
+            }
             // Хвост окна — в следующее: кластер на стыке не потеряется
             val advance = filled - OVERLAP_BYTES
             input.skipFully(advance)
             scanned += advance
         }
-        return false
+        return Scan.NOT_FOUND
     }
 
     private fun matchesCluster(buffer: ByteArray, at: Int, filled: Int): Boolean {
@@ -111,14 +196,42 @@ class MatroskaResyncExtractor(private val delegate: Extractor) : Extractor {
 
     override fun getUnderlyingImplementation(): Extractor = delegate.underlyingImplementation
 
-    private companion object {
-        const val TAG = "MatroskaResync"
-        val CLUSTER_ID = byteArrayOf(0x1F, 0x43, 0xB6.toByte(), 0x75)
-        const val TIMECODE_ID = 0xE7
-        const val CRC32_ID = 0xBF
-        const val WINDOW_BYTES = 64 * 1024
-        const val OVERLAP_BYTES = 16
-        const val MAX_SCAN_BYTES = 64L * 1024 * 1024
-        const val MAX_RESYNCS = 50
+    companion object {
+        private const val TAG = "MatroskaResync"
+        private val CLUSTER_ID = byteArrayOf(0x1F, 0x43, 0xB6.toByte(), 0x75)
+        private const val ID_CUES = 0x1C53BB6B
+        private const val TIMECODE_ID = 0xE7
+        private const val CRC32_ID = 0xBF
+        private const val WINDOW_BYTES = 64 * 1024
+        private const val OVERLAP_BYTES = 16
+        private const val MAX_SCAN_BYTES = 64L * 1024 * 1024
+        private const val MAX_RESYNCS = 50
+
+        /**
+         * Порча данных, а не ошибка в логике разборщика: неверный заголовок элемента
+         * («No valid varint length mask found») или длина NAL с поднятым старшим битом
+         * («Top bit not zero: …», ParsableByteArray.readUnsignedIntToInt).
+         */
+        fun isDamagedData(e: IllegalStateException): Boolean {
+            val message = e.message ?: return false
+            return message.contains("varint", ignoreCase = true) ||
+                    message.startsWith("Top bit not zero")
+        }
+
+        private val IN_CUES_ELEMENT: Field? = field("inCuesElement")
+        private val SENT_SEEK_MAP: Field? = field("sentSeekMap")
+        private val SEEK_AFTER_CUES: Field? = field("seekPositionAfterBuildingCues")
+        private val END_MASTER_ELEMENT: Method? = try {
+            MatroskaExtractor::class.java.getDeclaredMethod("endMasterElement", Int::class.javaPrimitiveType)
+                .apply { isAccessible = true }
+        } catch (e: ReflectiveOperationException) {
+            null
+        }
+
+        private fun field(name: String): Field? = try {
+            MatroskaExtractor::class.java.getDeclaredField(name).apply { isAccessible = true }
+        } catch (e: ReflectiveOperationException) {
+            null
+        }
     }
 }
