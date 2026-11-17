@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.Extractor
 import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.extractor.avi.AviExtractor
 import androidx.media3.extractor.mkv.MatroskaExtractor
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory
 import androidx.media3.extractor.text.SubtitleParser
@@ -29,6 +30,7 @@ import io.github.peerless2012.ass.media.kt.withAssSupport
 import io.github.peerless2012.ass.media.parser.AssSubtitleParserFactory
 import io.github.peerless2012.ass.media.type.AssRenderType
 import io.github.peerless2012.ass.media.widget.AssSubtitleView
+import my.torrstream.app.player.avi.RobustAviExtractor
 
 /**
  * ASS/SSA через libass для ExoPlayer. Сам Media3 берёт из ASS только текст и позицию, поэтому
@@ -160,6 +162,10 @@ class AssSubtitles(context: Context) {
             )
             extractors.forEachIndexed { i, extractor ->
                 if (extractor is MatroskaExtractor) extractors[i] = mkv
+                // AVI: кадры AC-3/MP3, разрезанные чанками, битый hdrl, fourcc вроде X264
+                if (extractor is AviExtractor) extractors[i] = RobustAviExtractor(
+                    RobustAviExtractor.FLAG_EMIT_RAW_SUBTITLE_DATA, SubtitleParser.Factory.UNSUPPORTED,
+                )
             }
             // Переход, потерянный при сбое открытия потока, — повторить (SeekGuardExtractor);
             // Dolby Vision profile 7 без декодера DV — как HEVC (DolbyVisionBaseLayer)
