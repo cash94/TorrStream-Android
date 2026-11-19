@@ -2309,7 +2309,10 @@ class InternalPlayerActivity : AppCompatActivity() {
                     if (trackType == C.TRACK_TYPE_TEXT) onlineOff()
                     // Озвучка выбрана руками — запоминаем по признакам, а не по группе
                     // дорожек: у следующей серии группа другая (см. restoreAudioChoice)
-                    if (trackType == C.TRACK_TYPE_AUDIO) rememberAudioChoice(group.getTrackFormat(i), ordinal)
+                    if (trackType == C.TRACK_TYPE_AUDIO) {
+                        rememberAudioChoice(group.getTrackFormat(i), ordinal)
+                        saveAudioPrefToServer(audioIndexInFile(group, i))
+                    }
                     p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                         .setTrackTypeDisabled(trackType, false)
                         .setOverrideForType(TrackSelectionOverride(mediaGroup, i))
@@ -2634,6 +2637,155 @@ class InternalPlayerActivity : AppCompatActivity() {
         return parts.joinToString(" · ").ifBlank { "#${fallbackIndex + 1}" }
     }
 
+    // region audio choice on the server
+
+    /**
+     * Озвучка, сохранённая на сервере для файла (как у веб-плеера: /api/audio/pref/save и
+     * /api/media/prefs/get). Плеер раньше её не отправлял и не читал: выбор жил только до
+     * выхода из плеера, а запуск заново или другой серии начинал с первой дорожки.
+     */
+    private class FileRef(val hash: String, val fileId: Int) {
+        val key get() = "${hash}_$fileId"
+    }
+
+    /** Файл раздачи текущего элемента очереди (ссылка TorrServer /stream?link=…&index=…). */
+    private fun currentFileRef(): FileRef? {
+        val uri = player?.currentMediaItem?.localConfiguration?.uri ?: return null
+        val link = uri.getQueryParameter("link")?.takeIf { it.isNotBlank() } ?: return null
+        val hash = infoHashFrom(link) ?: return null
+        val fileId = uri.getQueryParameter("index")?.toIntOrNull() ?: return null
+        return FileRef(hash, fileId)
+    }
+
+    /** Адрес API дорожек: сервер тот же, что у таймкода (…/api/timecode/save → …/api/<path>). */
+    private fun prefsEndpoint(path: String): String? =
+        intent.getStringExtra(Extras.TIMECODE_API)?.takeIf { it.contains("/timecode/save") }
+            ?.replace("/timecode/save", path)
+
+    /** Номер звуковой дорожки среди всех звуковых дорожек файла — как у ffprobe и веб-плеера. */
+    private fun audioIndexInFile(group: Tracks.Group, trackIndex: Int): Int {
+        var n = 0
+        for (g in player?.currentTracks?.groups ?: return -1) {
+            if (g.type != C.TRACK_TYPE_AUDIO) continue
+            if (g.mediaTrackGroup == group.mediaTrackGroup) return n + trackIndex
+            n += g.length
+        }
+        return -1
+    }
+
+    /** Дорожка серии с сервера: ключ файла → номер; ждёт, пока плеер разберёт файл. */
+    private var serverAudio: Pair<String, Int>? = null
+
+    /** Файл, для которого сохранённую дорожку уже применили (или выбрали руками). */
+    private var serverAudioDoneKey: String? = null
+
+    private fun saveAudioPrefToServer(audioIndex: Int) {
+        val ref = currentFileRef() ?: return
+        serverAudio = null
+        serverAudioDoneKey = ref.key
+        val endpoint = prefsEndpoint("/audio/pref/save") ?: return
+        val clientId = intent.getStringExtra(Extras.CLIENT_ID)?.takeIf { it.isNotBlank() } ?: return
+        if (audioIndex < 0) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            var connection: HttpURLConnection? = null
+            try {
+                val body = JSONObject().apply {
+                    put("hash", ref.hash)
+                    put("fileId", ref.fileId.toString())
+                    put("audioTrack", audioIndex)
+                    put("clientId", clientId)
+                }.toString()
+                connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 8_000
+                    readTimeout = 8_000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    ServerCookies.forUrl(endpoint)?.let { setRequestProperty("Cookie", it) }
+                }
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                Log.d(TAG, "Audio pref saved: track $audioIndex of ${ref.key} (HTTP ${connection.responseCode})")
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio pref save failed: ${e.message}")
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
+
+    /** Новая серия: спросить у сервера, какую озвучку выбирали для этого файла (или раздачи). */
+    private fun loadServerAudioPref() {
+        if (audioChoice != null) return   // выбрано руками в этом запуске — действует оно
+        val ref = currentFileRef() ?: return
+        if (ref.key == serverAudioDoneKey) return
+        val endpoint = prefsEndpoint("/media/prefs/get") ?: return
+        val clientId = intent.getStringExtra(Extras.CLIENT_ID)?.takeIf { it.isNotBlank() } ?: return
+        lifecycleScope.launch {
+            val index = withContext(Dispatchers.IO) { fetchAudioPref(endpoint, clientId, ref) }
+            if (index == null || audioChoice != null) return@launch
+            // Пока ждали, серия могла смениться
+            if (currentFileRef()?.key != ref.key) return@launch
+            serverAudio = ref.key to index
+            applyServerAudio(player?.currentTracks)
+        }
+    }
+
+    private fun fetchAudioPref(endpoint: String, clientId: String, ref: FileRef): Int? {
+        val query = "?hash=${ref.hash}&fileId=${ref.fileId}&clientId=${java.net.URLEncoder.encode(clientId, "UTF-8")}"
+        // Старый сервер без /media/prefs/get отвечает 404 — тогда прежний маршрут только аудио
+        for (url in listOf(endpoint + query, endpoint.replace("/media/prefs/get", "/audio/pref/get") + query)) {
+            var connection: HttpURLConnection? = null
+            try {
+                connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 8_000
+                    readTimeout = 8_000
+                    ServerCookies.forUrl(url)?.let { setRequestProperty("Cookie", it) }
+                }
+                if (connection.responseCode !in 200..299) continue
+                val json = JSONObject(connection.inputStream.use { it.bufferedReader().readText() })
+                if (!json.has("audioTrack") || json.isNull("audioTrack")) return null
+                return json.optInt("audioTrack", -1).takeIf { it >= 0 }
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio pref fetch failed: ${e.message}")
+            } finally {
+                connection?.disconnect()
+            }
+        }
+        return null
+    }
+
+    /** Включить дорожку с сервера, как только плеер отдал список звуковых дорожек файла. */
+    private fun applyServerAudio(tracks: Tracks?) {
+        val (key, index) = serverAudio ?: return
+        val p = player ?: return
+        if (tracks == null || currentFileRef()?.key != key || key == serverAudioDoneKey) return
+
+        var n = 0
+        var anyAudio = false
+        var target: Pair<Tracks.Group, Int>? = null
+        for (group in tracks.groups) {
+            if (group.type != C.TRACK_TYPE_AUDIO) continue
+            anyAudio = true
+            if (index < n + group.length) {
+                target = group to (index - n)
+                break
+            }
+            n += group.length
+        }
+        if (!anyAudio) return   // список ещё не пришёл — onTracksChanged вернётся сюда
+        serverAudio = null
+        serverAudioDoneKey = key
+        val (group, i) = target ?: return
+        if (!group.isTrackSupported(i) || group.isTrackSelected(i)) return
+        Log.i(TAG, "Audio pref from server: track $index of $key")
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, i))
+            .build()
+    }
+
+    // endregion
+
     private fun rememberAudioChoice(format: Format, ordinal: Int) {
         audioChoice = AudioChoice(
             language = format.language?.takeIf { it.isNotBlank() && it != "und" },
@@ -2681,7 +2833,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             }
         }
         val group = bestGroup ?: return
-        if (group.isTrackSelected(bestIndex)) return
+        if (bestScore <= 0 || group.isTrackSelected(bestIndex)) return
         val key = "${p.currentMediaItemIndex}:${group.mediaTrackGroup.id}:$bestIndex"
         if (key == audioRestoreKey) return
         audioRestoreKey = key
@@ -3022,6 +3174,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         newPlayer.prepare()
         OnlineSubtitles.proxyBase = intent.getStringExtra(Extras.ONLINE_SUBS_PROXY)
         onlineOnItem()
+        loadServerAudioPref()
 
         updateTitle()
         updateEpisodeButtons()
@@ -3317,12 +3470,14 @@ class InternalPlayerActivity : AppCompatActivity() {
             offeredSkipKeys.clear()
             hideSkipButton()
             onlineOnItem()
+            loadServerAudioPref()
         }
 
         override fun onTracksChanged(tracks: Tracks) {
             updateEpisodeButtons()
             logTracks(tracks)
             restoreAudioChoice(tracks)
+            applyServerAudio(tracks)
             // Отрисовка libass появляется вместе с дорожкой, раньше масштаб задать некому
             assSubtitles?.setFontScale(Prefs.PLAYER_SUBTITLE_SCALES[playerSubtitleSize])
             // Видео или звук есть, но ни одну дорожку этого типа ExoPlayer декодировать не

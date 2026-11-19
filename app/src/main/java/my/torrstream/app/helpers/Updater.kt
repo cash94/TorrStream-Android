@@ -41,9 +41,15 @@ object Updater {
      * числа — на версиях вида 1.0.1 это давало «0.1», а 1.0.10 превращалось в
      * «0.10», то есть в то же самое 0.1, и обновление не предлагалось.
      */
-    private fun versionParts(raw: String): List<Int> =
-        raw.trim().removePrefix("v").substringBefore('-').split('.')
+    private fun versionParts(raw: String): List<Int> {
+        val text = raw.trim().removePrefix("v")
+        val numbers = text.substringBefore('-').split('.')
             .map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }
+        // «1.1.35-1» — повторный выпуск той же версии: число после дефиса — ещё один разряд
+        // (1.1.35 < 1.1.35-1 < 1.1.36). Хвост «-gabcdef» у сборок между тегами не считается
+        val revision = Regex("^[^-]*-(\\d+)(?:-|$)").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        return numbers + revision
+    }
 
     /** Версия тега строго больше текущей (BuildConfig.VERSION_NAME). */
     private fun isNewerThanCurrent(tag: String): Boolean {
