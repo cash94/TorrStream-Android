@@ -27,6 +27,12 @@
     <dimen name="hud_header_start">14dp</dimen>
     <dimen name="hud_header_top">12dp</dimen>
     <dimen name="hud_title_text">16sp</dimen>
+    <!-- Логотип названия и строка серии под ним (.player-title-logo / .player-title-episode):
+         на узком экране в вебе 44px и 13px -->
+    <dimen name="hud_logo_max_width">200dp</dimen>
+    <dimen name="hud_logo_max_height">44dp</dimen>
+    <dimen name="hud_episode_text">13sp</dimen>
+    <dimen name="hud_episode_top">5dp</dimen>
     <dimen name="hud_stats_text">12sp</dimen>
     <dimen name="hud_clock_top">14dp</dimen>
     <dimen name="hud_clock_end">14dp</dimen>

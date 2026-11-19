@@ -25,6 +25,7 @@ import android.view.animation.LinearInterpolator
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.SeekBar
@@ -64,6 +65,11 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
+import com.bumptech.glide.Glide
+import com.bumptech.glide.load.DataSource
+import com.bumptech.glide.load.engine.GlideException
+import com.bumptech.glide.request.RequestListener
+import com.bumptech.glide.request.target.Target
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import android.text.SpannableStringBuilder
@@ -144,6 +150,12 @@ class InternalPlayerActivity : AppCompatActivity() {
         const val ONLINE_SUBS = "online_subs"
         // Base of the online-subtitles proxy (apiproxy.json: subsApi); absent — straight to the services
         const val ONLINE_SUBS_PROXY = "online_subs_proxy"
+        // Заголовок как у веб-плеера: адрес логотипа TMDB, название TMDB (вместо логотипа, пока он
+        // грузится или его нет) и String[] строк серии «Сезон 1 · Серия 5 · Название» параллельно
+        // очереди. Нет ни логотипа, ни названия — прежний текст: TITLE и «Серия N» после него
+        const val TITLE_LOGO = "title_logo"
+        const val TITLE_NAME = "title_name"
+        const val EPISODE_LINES = "episode_lines"
         // «Переключать серии автоматически» веб-интерфейса. false — список серий в плеере есть,
         // но по концу серии плеер закрывается, как после фильма. Нет extra — переключать.
         const val AUTO_NEXT = "auto_next"
@@ -163,6 +175,9 @@ class InternalPlayerActivity : AppCompatActivity() {
 
         /** Сколько раз за запуск плеер продолжает с того же места после порченых данных потока. */
         private const val MAX_STREAM_RESTARTS = 3
+
+        /** Сколько ждать логотип названия, прежде чем показать вместо него текст (как веб-плеер). */
+        private const val TITLE_LOGO_WAIT_MS = 2_500L
 
         /** Перезапуск после порчи не ушёл дальше этого — значит, упёрлись в то же место. */
         private const val STREAM_PROGRESS_MS = 5_000L
@@ -300,6 +315,10 @@ class InternalPlayerActivity : AppCompatActivity() {
     private lateinit var playerView: PlayerView
     private lateinit var progressBar: ProgressBar
     private lateinit var titleView: TextView
+    private lateinit var titleLogoView: ImageView
+    private lateinit var episodeView: TextView
+    private var titleLogoState = LogoState.NONE
+    private var titleLogoWaitOver = false
     private lateinit var headerView: View
     private lateinit var statsView: TextView
     private var statsJob: Job? = null
@@ -388,6 +407,26 @@ class InternalPlayerActivity : AppCompatActivity() {
     private var resumeIndex: Int? = null
     private var resumePositionMs: Long? = null
     private var resumeTrackParams: TrackSelectionParameters? = null
+
+    /**
+     * Озвучка, выбранная руками, — по признакам дорожки. Выбор в ExoPlayer
+     * (TrackSelectionOverride) привязан к группе дорожек и переживает смену серии, только если
+     * группа в новом файле совпадает с прежней до последнего поля формата; стоит серии отличаться
+     * хоть битрейтом — звук возвращается на дорожку по умолчанию. Поэтому выбор помним ещё и
+     * сами: язык, название, каналы, кодек и порядковый номер, а на новой серии ищем похожую.
+     */
+    private data class AudioChoice(
+        val language: String?,
+        val label: String?,
+        val channelCount: Int,
+        val mimeType: String?,
+        val ordinal: Int,
+    )
+
+    private var audioChoice: AudioChoice? = null
+
+    /** Какую дорожку уже пробовали включить из [audioChoice] — чтобы не повторять без конца. */
+    private var audioRestoreKey: String? = null
 
     /**
      * Приложение свернули: в onStop плеер освобождается, в onStart собирается заново с
@@ -567,6 +606,9 @@ class InternalPlayerActivity : AppCompatActivity() {
         scaleToast = findViewById(R.id.scaleToast)
         progressBar = findViewById(R.id.playerProgress)
         titleView = findViewById(R.id.playerTitle)
+        titleLogoView = findViewById(R.id.playerTitleLogo)
+        episodeView = findViewById(R.id.playerEpisode)
+        loadTitleLogo()
         headerView = findViewById(R.id.playerHeader)
         statsView = findViewById(R.id.playerStats)
         controlsPanel = findViewById(R.id.controlsPanel)
@@ -2261,9 +2303,13 @@ class InternalPlayerActivity : AppCompatActivity() {
                 if (group.isTrackSelected(i)) checked = labels.size
                 labels += describeTrack(group, i, labels.size)
                 val mediaGroup = group.mediaTrackGroup
+                val ordinal = labels.size - 1
                 actions += {
                     // Обычные и онлайн-субтитры взаимоисключающие
                     if (trackType == C.TRACK_TYPE_TEXT) onlineOff()
+                    // Озвучка выбрана руками — запоминаем по признакам, а не по группе
+                    // дорожек: у следующей серии группа другая (см. restoreAudioChoice)
+                    if (trackType == C.TRACK_TYPE_AUDIO) rememberAudioChoice(group.getTrackFormat(i), ordinal)
                     p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                         .setTrackTypeDisabled(trackType, false)
                         .setOverrideForType(TrackSelectionOverride(mediaGroup, i))
@@ -2586,6 +2632,64 @@ class InternalPlayerActivity : AppCompatActivity() {
         format.codecs?.takeIf { it.isNotBlank() }?.let { parts += it }
         format.sampleMimeType?.takeIf { parts.isEmpty() }?.let { parts += it }
         return parts.joinToString(" · ").ifBlank { "#${fallbackIndex + 1}" }
+    }
+
+    private fun rememberAudioChoice(format: Format, ordinal: Int) {
+        audioChoice = AudioChoice(
+            language = format.language?.takeIf { it.isNotBlank() && it != "und" },
+            label = format.label?.takeIf { it.isNotBlank() },
+            channelCount = format.channelCount,
+            mimeType = format.sampleMimeType,
+            ordinal = ordinal,
+        )
+        audioRestoreKey = null
+    }
+
+    /**
+     * Новая серия (или пересборка плеера): если выбранной руками озвучки в списке нет под
+     * выбором — включить самую похожую. Язык другой — не подходит вовсе (лучше дорожка по
+     * умолчанию, чем чужой язык); название и язык важнее каналов, кодека и номера по порядку.
+     */
+    private fun restoreAudioChoice(tracks: Tracks) {
+        val choice = audioChoice ?: return
+        val p = player ?: return
+        if (C.TRACK_TYPE_AUDIO in p.trackSelectionParameters.disabledTrackTypes) return
+
+        var ordinal = 0
+        var bestScore = -1
+        var bestGroup: Tracks.Group? = null
+        var bestIndex = -1
+        for (group in tracks.groups) {
+            if (group.type != C.TRACK_TYPE_AUDIO || !group.isSupported) continue
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) continue
+                val format = group.getTrackFormat(i)
+                val language = format.language?.takeIf { it.isNotBlank() && it != "und" }
+                val position = ordinal++
+                if (choice.language != null && language != null && !language.equals(choice.language, true)) continue
+                var score = 0
+                if (choice.language != null && language != null) score += 8
+                if (choice.label != null && choice.label == format.label) score += 16
+                if (choice.mimeType != null && choice.mimeType == format.sampleMimeType) score += 2
+                if (choice.channelCount > 0 && choice.channelCount == format.channelCount) score += 2
+                if (choice.ordinal == position) score += 1
+                if (score > bestScore) {
+                    bestScore = score
+                    bestGroup = group
+                    bestIndex = i
+                }
+            }
+        }
+        val group = bestGroup ?: return
+        if (group.isTrackSelected(bestIndex)) return
+        val key = "${p.currentMediaItemIndex}:${group.mediaTrackGroup.id}:$bestIndex"
+        if (key == audioRestoreKey) return
+        audioRestoreKey = key
+        Log.i(TAG, "Restoring audio choice $choice -> ${describeTrack(group, bestIndex, bestIndex)}")
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, bestIndex))
+            .build()
     }
 
     /** Turns a track's language tag ("rus", "en") into something readable, or leaves it as is. */
@@ -2911,6 +3015,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         // разборе файла, у libVLC группы новые — тогда просто дорожки по умолчанию
         resumeTrackParams?.let { newPlayer.trackSelectionParameters = it }
         resumeTrackParams = null
+        audioRestoreKey = null
 
         newPlayer.setMediaItems(items, startIndex, startPosition)
         newPlayer.playWhenReady = true
@@ -3050,12 +3155,85 @@ class InternalPlayerActivity : AppCompatActivity() {
     private fun updateTitle() {
         val base = intent.getStringExtra(Extras.TITLE)?.trim().orEmpty()
         val p = player
-        titleView.text = if (p != null && p.mediaItemCount > 1) {
-            val episode = episodeLabel(p.currentMediaItemIndex)
-            if (base.isEmpty()) episode else "$base · $episode"
-        } else {
-            base
+        val name = intent.getStringExtra(Extras.TITLE_NAME)?.trim().orEmpty()
+        val hasLogo = !intent.getStringExtra(Extras.TITLE_LOGO).isNullOrBlank()
+
+        // Веб без логотипа и названия (старый или раздача неизвестна TMDB) — прежний текст
+        if (name.isEmpty() && !hasLogo) {
+            titleLogoView.visibility = View.GONE
+            episodeView.visibility = View.GONE
+            titleView.visibility = View.VISIBLE
+            titleView.text = if (p != null && p.mediaItemCount > 1) {
+                val episode = episodeLabel(p.currentMediaItemIndex)
+                if (base.isEmpty()) episode else "$base · $episode"
+            } else {
+                base
+            }
+            return
         }
+
+        // Как в веб-плеере: логотип (нет — название), под ним у сериала строка серии. Фильму
+        // строка не нужна: веб её не шлёт
+        val lines = intent.getStringArrayExtra(Extras.EPISODE_LINES)
+        val index = p?.currentMediaItemIndex ?: 0
+        val line = lines?.getOrNull(index)?.takeIf { it.isNotBlank() }
+            ?: if (lines != null && p != null && p.mediaItemCount > 1) episodeLabel(index) else null
+        episodeView.text = line.orEmpty()
+        episodeView.visibility = if (line == null) View.GONE else View.VISIBLE
+
+        val text = name.ifEmpty { base }
+        when {
+            titleLogoState == LogoState.SHOWN -> {
+                titleLogoView.visibility = View.VISIBLE
+                titleView.visibility = View.GONE
+            }
+            // Логотип ещё грузится: название невидимо, но место держит — иначе оно мелькнёт и
+            // сменится картинкой. Не пришёл за TITLE_LOGO_WAIT_MS — остаётся названием
+            titleLogoState == LogoState.LOADING && !titleLogoWaitOver -> {
+                titleLogoView.visibility = View.INVISIBLE
+                titleView.text = text
+                titleView.visibility = View.INVISIBLE
+            }
+            else -> {
+                titleLogoView.visibility = View.GONE
+                titleView.text = text
+                titleView.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    private enum class LogoState { NONE, LOADING, SHOWN, FAILED }
+
+    /** Загрузить логотип названия (один раз на запуск плеера, он общий для всех серий). */
+    private fun loadTitleLogo() {
+        val url = intent.getStringExtra(Extras.TITLE_LOGO)?.takeIf { it.startsWith("http") } ?: return
+        titleLogoState = LogoState.LOADING
+        titleLogoWaitOver = false
+        titleLogoView.visibility = View.INVISIBLE
+        Glide.with(this).load(url).listener(object : RequestListener<Drawable> {
+            override fun onLoadFailed(
+                e: GlideException?, model: Any?, target: Target<Drawable>, isFirstResource: Boolean,
+            ): Boolean {
+                titleLogoState = LogoState.FAILED
+                updateTitle()
+                return false
+            }
+
+            override fun onResourceReady(
+                resource: Drawable, model: Any, target: Target<Drawable>?,
+                dataSource: DataSource, isFirstResource: Boolean,
+            ): Boolean {
+                titleLogoState = LogoState.SHOWN
+                updateTitle()
+                return false
+            }
+        }).into(titleLogoView)
+        handler.postDelayed({
+            if (titleLogoState == LogoState.LOADING) {
+                titleLogoWaitOver = true
+                updateTitle()
+            }
+        }, TITLE_LOGO_WAIT_MS)
     }
 
     /** "Серия 1 - Название" from the web UI when it sent one for this item, else "Episode N". */
@@ -3144,6 +3322,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         override fun onTracksChanged(tracks: Tracks) {
             updateEpisodeButtons()
             logTracks(tracks)
+            restoreAudioChoice(tracks)
             // Отрисовка libass появляется вместе с дорожкой, раньше масштаб задать некому
             assSubtitles?.setFontScale(Prefs.PLAYER_SUBTITLE_SCALES[playerSubtitleSize])
             // Видео или звук есть, но ни одну дорожку этого типа ExoPlayer декодировать не

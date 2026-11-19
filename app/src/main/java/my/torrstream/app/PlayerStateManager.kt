@@ -111,7 +111,9 @@ class PlayerStateManager(context: Context) {
         val episode: Int? = null,
         val imdbId: String? = null,
         val episodeTitle: String? = null,
-        val onlineSubs: String? = null
+        val onlineSubs: String? = null,
+        /** Line under the title logo, as the web player shows it: "Сезон 1 · Серия 5 · Название". */
+        val episodeLine: String? = null
     ) {
         /**
          * Data class representing playback timeline information.
@@ -362,6 +364,7 @@ class PlayerStateManager(context: Context) {
                         put("url", item.url)
                         item.title?.let { put("title", it) }
                         item.episodeTitle?.let { put("episode_title", it) }
+                        item.episodeLine?.let { put("episode_line", it) }
                         item.timeline?.let { timeline ->
                             put("timeline", JSONObject().apply {
                                 put("hash", timeline.hash)
@@ -754,7 +757,8 @@ class PlayerStateManager(context: Context) {
                 ?: optJSONObject("card")?.optString("imdb_id")?.takeIf { it.isNotEmpty() },
 
             episodeTitle = optString("episode_title").takeIf { it.isNotEmpty() },
-            onlineSubs = optJSONObject("online_subs")?.toString()
+            onlineSubs = optJSONObject("online_subs")?.toString(),
+            episodeLine = optString("episode_line").takeIf { it.isNotEmpty() }
         )
     }
 
@@ -831,6 +835,7 @@ class PlayerStateManager(context: Context) {
             episode?.let { put("episode", it) }
             imdbId?.let { put("imdb_id", it) }
             episodeTitle?.let { put("episode_title", it) }
+            episodeLine?.let { put("episode_line", it) }
             onlineSubs?.let { put("online_subs", JSONObject(it)) }
         }
     }

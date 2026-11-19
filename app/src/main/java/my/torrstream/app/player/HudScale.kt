@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
@@ -92,6 +93,16 @@ object HudScale {
             left = m.vw(3.5f), top = m.vw(1.6f), right = m.vw(11f), bottom = m.dp(48f * m.k),
         )
         root.findViewById<TextView>(R.id.playerTitle)?.px(m.vwF(1.9f))
+        // Логотип названия: до 28vw в ширину и 5.2vw в высоту; под ним строка серии 1.35vw
+        // с отступом 0.6vw
+        root.findViewById<ImageView>(R.id.playerTitleLogo)?.let {
+            it.maxWidth = m.vw(28f)
+            it.maxHeight = m.vw(5.2f)
+        }
+        root.findViewById<TextView>(R.id.playerEpisode)?.let {
+            it.px(m.vwF(1.35f))
+            it.updateLayoutParams<ViewGroup.MarginLayoutParams> { topMargin = m.vw(0.6f) }
+        }
         root.findViewById<TextView>(R.id.playerStats)?.let {
             it.px(m.vwF(1.2f))
             it.updateLayoutParams<ViewGroup.MarginLayoutParams> { topMargin = m.dp(6f * m.k) }

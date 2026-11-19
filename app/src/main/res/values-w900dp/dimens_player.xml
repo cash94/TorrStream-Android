@@ -15,6 +15,11 @@
     <dimen name="hud_header_start">34dp</dimen>
     <dimen name="hud_header_top">15dp</dimen>
     <dimen name="hud_title_text">18sp</dimen>
+    <!-- 28vw, 5.2vw, 1.35vw и 0.6vw веба на экране 960dp -->
+    <dimen name="hud_logo_max_width">269dp</dimen>
+    <dimen name="hud_logo_max_height">50dp</dimen>
+    <dimen name="hud_episode_text">13sp</dimen>
+    <dimen name="hud_episode_top">6dp</dimen>
     <dimen name="hud_stats_text">11.5sp</dimen>
     <dimen name="hud_clock_top">16dp</dimen>
     <dimen name="hud_clock_end">19dp</dimen>

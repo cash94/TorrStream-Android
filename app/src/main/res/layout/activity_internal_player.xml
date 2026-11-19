@@ -54,6 +54,19 @@
         android:paddingEnd="110dp"
         android:paddingBottom="48dp">
 
+        <!-- Логотип TMDB вместо текста названия (как .player-title-logo веб-плеера). Скрыт,
+             пока картинки нет: тогда название показывает playerTitle -->
+        <ImageView
+            android:id="@+id/playerTitleLogo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:adjustViewBounds="true"
+            android:contentDescription="@null"
+            android:maxWidth="@dimen/hud_logo_max_width"
+            android:maxHeight="@dimen/hud_logo_max_height"
+            android:scaleType="fitStart"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/playerTitle"
             android:layout_width="match_parent"
@@ -66,6 +79,21 @@
             android:textColor="@android:color/white"
             android:textSize="@dimen/hud_title_text"
             android:textStyle="bold" />
+
+        <!-- «Сезон 1 · Серия 5 · Название» под логотипом (.player-title-episode) -->
+        <TextView
+            android:id="@+id/playerEpisode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/hud_episode_top"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:shadowColor="#B3000000"
+            android:shadowDy="1"
+            android:shadowRadius="6"
+            android:textColor="#E0FFFFFF"
+            android:textSize="@dimen/hud_episode_text"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/playerStats"

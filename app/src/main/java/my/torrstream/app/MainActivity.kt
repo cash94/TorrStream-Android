@@ -2908,6 +2908,20 @@ class MainActivity : BaseActivity(),
             if (onlineSubs.any { it.isNotEmpty() }) {
                 putExtra(InternalPlayerActivity.Extras.ONLINE_SUBS, onlineSubs.toTypedArray())
             }
+            // Заголовок как у веб-плеера: логотип TMDB (без него — название), под ним у
+            // сериала «Сезон 1 · Серия 5 · Название» — своя строка у каждого элемента очереди.
+            // Старый веб ничего из этого не шлёт — плеер остаётся с прежним текстом
+            jsonObject.optString("title_logo").takeIf { it.startsWith("http") }?.let {
+                putExtra(InternalPlayerActivity.Extras.TITLE_LOGO, it)
+            }
+            jsonObject.optString("title_name").takeIf { it.isNotBlank() }?.let {
+                putExtra(InternalPlayerActivity.Extras.TITLE_NAME, it)
+            }
+            val episodeLines = if (state.playlist.size > 1) state.playlist.map { it.episodeLine.orEmpty() }
+            else listOf(currentItem.episodeLine.orEmpty())
+            if (episodeLines.any { it.isNotEmpty() }) {
+                putExtra(InternalPlayerActivity.Extras.EPISODE_LINES, episodeLines.toTypedArray())
+            }
             // Прокси онлайн-субтитров: «http://tssubs.torrstream.online», пусто — напрямую
             jsonObject.optString("online_subs_proxy").takeIf { it.startsWith("http") }?.let {
                 putExtra(InternalPlayerActivity.Extras.ONLINE_SUBS_PROXY, it)
