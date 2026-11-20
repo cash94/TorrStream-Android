@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONException
 import org.json.JSONObject
 import my.torrstream.app.browser.Browser
+import my.torrstream.app.browser.ImageCache
 import my.torrstream.app.helpers.Helpers.debugLog
 import my.torrstream.app.helpers.Prefs.appLang
 import my.torrstream.app.helpers.Prefs.backHoldExit
@@ -223,6 +224,17 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     // Трейлеры RuTube идут с устройства мимо прокси сервера (browser/TrailerDirect.kt)
     @JavascriptInterface
     fun trailerDirect(): Boolean = true
+
+    // Картинки TMDB качает только ImageCache, один раз: фоновый поток страницы
+    // (poster-prefetch.js) помечает свои запросы «ts_pf», и WebView их не качает
+    // (browser/ImageCache.kt)
+    @JavascriptInterface
+    fun imagePrefetch(): Boolean = true
+
+    // Фоновая очередь картинок больше не нужна (ушли с главной). JSON-массив выброшенных
+    // адресов — страница забудет их и попросит снова, когда понадобятся
+    @JavascriptInterface
+    fun imagePrefetchDropLow(): String = ImageCache.dropLow()
 
     // Плеер понимает auto_next=false: список серий есть, но по концу серии плеер закрывается
     // (player.js шлёт плейлист и при выключенном «Переключать серии автоматически»)

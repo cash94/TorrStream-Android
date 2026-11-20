@@ -1,5 +1,6 @@
 package my.torrstream.app.browser
 
+import android.net.Uri
 import android.util.Log
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -13,12 +14,13 @@ import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import org.json.JSONArray
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
 import java.io.InputStream
-import java.util.Collections
-import java.util.concurrent.ConcurrentHashMap
+import java.util.TreeSet
 import java.util.concurrent.TimeUnit
 
 /**
@@ -34,12 +36,24 @@ import java.util.concurrent.TimeUnit
  * картинки, которые дольше всех не показывались. Порядок переживает перезапуск — это mtime
  * файла, его обновляем при каждом попадании.
  *
- * Промах WebView грузит сам, а кэш докачивает ту же картинку в фоне ([prefetch]). Раньше
- * промах отдавался потоком, который качал картинку прямо при чтении, — на потоке WebView.
- * Таких потоков мало, и пока они висели на медленном или молчащем зеркале (до 15 с на
- * картинку), ждали все запросы страницы, включая API: после нескольких минут простоя
- * соединения в пуле OkHttp оказывались мёртвыми, и каталог переставал грузить постеры, а
- * карточка — детали. Цена фона — второй запрос картинки, один раз, пока её нет на диске.
+ * Качает картинки только сам кэш, своей очередью ([enqueue]) — на потоках OkHttp, не WebView.
+ * Сеть на потоке WebView (shouldInterceptRequest) держит все остальные запросы страницы:
+ * пока такие потоки висели на медленном или молчащем зеркале, каталог переставал грузить
+ * постеры, а карточка — детали.
+ *
+ * Запросы бывают двух видов:
+ *  - фоновый поток страницы (PosterPrefetch в poster-prefetch.js) помечает свои запросы
+ *    «ts_pf» ([MARK_PARAM]): ему нужна не картинка, а чтобы она оказалась в кэше. Ему сразу
+ *    отвечаем пустым 200, а картинку ставим в очередь — WebView её не качает вовсе;
+ *  - <img> страницы: есть на диске — отдаём, нет — WebView грузит сам, а кэш ставит ту же
+ *    картинку в очередь первой. Раньше так было со всеми картинками, и каждую новую
+ *    качали дважды: WebView для страницы и кэш для себя (замер: 8 МБ трафика на 3.9 МБ
+ *    постеров). Теперь второй раз — только если <img> опередил докачку.
+ *
+ * Очередь повторяет порядок PosterPrefetch: сначала промахи <img> (их видно прямо сейчас),
+ * потом срочные — свежая пачка впереди прежних, внутри пачки по порядку, — потом фоновые по
+ * очереди и не больше [LOW_PARALLEL] разом. Фоновые страница может выбросить ([dropLow]):
+ * ушли с главной — «на потом» уже не наступит.
  */
 object ImageCache {
     private const val TAG = "ImageCache"
@@ -50,6 +64,12 @@ object ImageCache {
     private const val PATH_MARK = "/t/p/"
     private const val TMP_SUFFIX = ".tmp"
 
+    /**
+     * Метка запроса фонового потока страницы: «u.<номер пачки>» — срочный, «l» — фоновый.
+     * Номер пачки — счётчик сообщений воркеру: больше — свежее.
+     */
+    private const val MARK_PARAM = "ts_pf"
+
     /** «w342/abc.jpg»: размер и имя файла TMDB, больше в пути ничего быть не должно. */
     private val PATH_RE = Regex("^[a-z0-9]+/[A-Za-z0-9_-]+\\.(jpe?g|png|webp|svg)$")
 
@@ -57,6 +77,12 @@ object ImageCache {
         // Картинку может прочитать и canvas/fetch с другого источника — как с самого зеркала
         "Access-Control-Allow-Origin" to "*",
         "Cache-Control" to "max-age=31536000, immutable",
+    )
+
+    /** Ответ фоновому потоку: «принято», тела нет — картинка ему не нужна. */
+    private val QUEUED_HEADERS = mapOf(
+        "Access-Control-Allow-Origin" to "*",
+        "Cache-Control" to "no-store",
     )
 
     private val dir by lazy { File(App.context.cacheDir, "images") }
@@ -67,17 +93,15 @@ object ImageCache {
     private var loaded = false
     private val lock = Any()
 
-    /** Таймаут фоновой докачки: соединение — половина, чтение и весь запрос — целиком. */
+    /** Таймаут докачки: соединение — половина, чтение и весь запрос — целиком. */
     private const val PREFETCH_TIMEOUT_MS = 10_000
-    /** Сколько картинок докачивается одновременно и сколько из них — с одного зеркала. */
-    private const val PREFETCH_PARALLEL = 4
-    private const val PREFETCH_PER_HOST = 2
-    /** Больше ждущих — новые промахи не докачиваем: при быстром листании очередь устаревает. */
-    private const val PREFETCH_MAX_PENDING = 64
-
-    /** Имена картинок, которые сейчас докачиваются или ждут очереди. */
-    // newSetFromMap, а не ConcurrentHashMap.newKeySet: тот появился только в API 24, minSdk — 23
-    private val pending: MutableSet<String> = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+    /** Сколько картинок качается одновременно, из них фоновых — не больше [LOW_PARALLEL]. */
+    private const val PARALLEL = 6
+    private const val LOW_PARALLEL = 3
+    private const val PER_HOST = 3
+    /** Длиннее очереди не держим: выпадают самые старые — фокус давно ушёл от них. */
+    private const val URGENT_MAX = 120
+    private const val LOW_MAX = 600
 
     private val client: OkHttpClient by lazy {
         // Тот же разрешительный TLS, что у остального приложения: WebView ошибки
@@ -87,31 +111,75 @@ object ImageCache {
             // нему висит до таймаута. По умолчанию OkHttp держит соединения 5 минут — дольше,
             // чем живут многие домашние NAT. 30 с хватает, чтобы переиспользовать соединение
             // при листании, и мёртвые в пуле не задерживаются.
-            .connectionPool(ConnectionPool(PREFETCH_PARALLEL, 30, TimeUnit.SECONDS))
+            .connectionPool(ConnectionPool(PARALLEL, 30, TimeUnit.SECONDS))
             .dispatcher(Dispatcher().apply {
-                maxRequests = PREFETCH_PARALLEL
-                maxRequestsPerHost = PREFETCH_PER_HOST
+                maxRequests = PARALLEL
+                maxRequestsPerHost = PER_HOST
             })
             .build()
     }
 
+    // ==================== ОЧЕРЕДЬ ====================
+
+    /** Класс очереди: промах <img>, срочный и фоновый запрос фонового потока страницы. */
+    private const val CLS_IMG = 0
+    private const val CLS_URGENT = 1
+    private const val CLS_LOW = 2
+
+    private class Job(
+        val name: String,
+        val url: String,
+        val headers: Map<String, String>,
+        val cls: Int,
+        val batch: Long,
+        val seq: Long,
+    )
+
+    /** Свежая пачка — первой, внутри пачки — по порядку прихода. */
+    private val freshFirst = Comparator<Job> { a, b ->
+        if (a.batch != b.batch) b.batch.compareTo(a.batch) else a.seq.compareTo(b.seq)
+    }
+    private val arrivalOrder = Comparator<Job> { a, b -> a.seq.compareTo(b.seq) }
+
+    // Всё ниже — под [qLock]
+    private val qLock = Any()
+    private val queues = arrayOf(TreeSet(freshFirst), TreeSet(freshFirst), TreeSet(arrivalOrder))
+    private val queued = HashMap<String, Job>()
+    private val running = HashSet<String>()
+    private var active = 0
+    private var activeLow = 0
+    private var seq = 0L
+    /** Своя нумерация пачек: номер страницы сбрасывается при её перезагрузке, наш — нет. */
+    private var batch = 0L
+    private var lastPageBatch: String? = null
+
     /**
      * Ответ для WebView или null, если запрос не наш или картинки нет на диске (тогда WebView
      * грузит сам). Зовётся из shouldInterceptRequest — на фоновом потоке WebView, и сети здесь
-     * нет ни в каком виде: только чтение файла с диска.
+     * нет ни в каком виде: только диск и постановка в очередь.
      */
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
         if (request.method != "GET" || request.isForMainFrame) return null
-        val url = request.url?.toString() ?: return null
+        val uri = request.url ?: return null
+        val url = uri.toString()
         val name = fileNameOf(url) ?: return null
         val headers = request.requestHeaders.orEmpty()
         if (headers.keys.any { it.equals("Range", ignoreCase = true) }) return null
+        val mark = try { uri.getQueryParameter(MARK_PARAM) } catch (e: Exception) { null }
 
         return try {
             ensureLoaded()
+            if (mark != null) {
+                // Фоновому потоку картинка не нужна — только чтобы она была на диске
+                if (touch(name)) return queuedResponse()
+                val urgent = mark.startsWith("u")
+                enqueue(stripMark(uri), name, headers, if (urgent) CLS_URGENT else CLS_LOW,
+                    if (urgent) mark.substringAfter('.', "") else null)
+                return queuedResponse()
+            }
             val cached = openCached(name)
             if (cached == null) {
-                prefetch(url, name, headers)
+                enqueue(url, name, headers, CLS_IMG, null)
                 return null
             }
             WebResourceResponse(mimeOf(name), null, 200, "OK", HEADERS, cached)
@@ -120,6 +188,137 @@ object ImageCache {
             null
         }
     }
+
+    private fun queuedResponse() =
+        WebResourceResponse("image/jpeg", null, 200, "OK", QUEUED_HEADERS, ByteArrayInputStream(ByteArray(0)))
+
+    /** Адрес без метки — каким его знает страница (и каким его попросит <img>). */
+    private fun stripMark(uri: Uri): String {
+        val b = uri.buildUpon().clearQuery()
+        for (p in uri.queryParameterNames) {
+            if (p == MARK_PARAM) continue
+            for (v in uri.getQueryParameters(p)) b.appendQueryParameter(p, v)
+        }
+        return b.build().toString()
+    }
+
+    /**
+     * В очередь. Уже стоит — поднимаем, если просят срочнее или в более свежей пачке;
+     * уже качается — ничего не делаем.
+     */
+    private fun enqueue(url: String, name: String, headers: Map<String, String>, cls: Int, pageBatch: String?) {
+        // Accept-Encoding не копируем: с ним OkHttp перестаёт сам распаковывать gzip
+        val hdrs = headers.filterKeys { !it.equals("Accept-Encoding", ignoreCase = true) }
+        synchronized(qLock) {
+            if (name in running) return
+            val b = when (cls) {
+                CLS_URGENT -> {
+                    // Новая пачка страницы — новая наша: она свежее всех, что уже ждут
+                    if (pageBatch != lastPageBatch) { lastPageBatch = pageBatch; batch++ }
+                    batch
+                }
+                CLS_IMG -> Long.MAX_VALUE
+                else -> 0L
+            }
+            val old = queued[name]
+            if (old != null) {
+                val better = cls < old.cls || (cls == old.cls && cls == CLS_URGENT && b > old.batch)
+                if (!better) return
+                queues[old.cls].remove(old)
+            }
+            val job = Job(name, url, hdrs, cls, b, ++seq)
+            queued[name] = job
+            val q = queues[cls]
+            q.add(job)
+            val max = if (cls == CLS_LOW) LOW_MAX else URGENT_MAX
+            while (q.size > max) q.pollLast()?.let { queued.remove(it.name) }
+            pumpLocked()
+        }
+    }
+
+    /** Запускает следующие загрузки, пока есть свободные места. Под [qLock]. */
+    private fun pumpLocked() {
+        while (active < PARALLEL) {
+            val q = when {
+                queues[CLS_IMG].isNotEmpty() -> queues[CLS_IMG]
+                queues[CLS_URGENT].isNotEmpty() -> queues[CLS_URGENT]
+                queues[CLS_LOW].isNotEmpty() && activeLow < LOW_PARALLEL -> queues[CLS_LOW]
+                else -> return
+            }
+            val job = q.pollFirst() ?: return
+            queued.remove(job.name)
+            running.add(job.name)
+            active++
+            if (job.cls == CLS_LOW) activeLow++
+            start(job)
+        }
+    }
+
+    private fun finished(job: Job) {
+        synchronized(qLock) {
+            running.remove(job.name)
+            active--
+            if (job.cls == CLS_LOW) activeLow--
+            pumpLocked()
+        }
+    }
+
+    /**
+     * Очистить фоновую очередь (страница ушла с главной). Уже идущие загрузки доходят до
+     * конца. Возвращает выброшенные адреса — JSON-массив: страница забудет их и попросит
+     * снова, когда они опять понадобятся.
+     */
+    fun dropLow(): String {
+        val out = JSONArray()
+        synchronized(qLock) {
+            for (job in queues[CLS_LOW]) {
+                queued.remove(job.name)
+                out.put(job.url)
+            }
+            queues[CLS_LOW].clear()
+        }
+        if (BuildConfig.DEBUG) Log.d(TAG, "Фоновая очередь очищена: ${out.length()}")
+        return out.toString()
+    }
+
+    private fun start(job: Job) {
+        val request = try {
+            val builder = Request.Builder().url(job.url)
+            // Заголовки WebView (User-Agent, Referer, Accept) — зеркало должно видеть тот же запрос
+            job.headers.forEach { (k, v) -> builder.header(k, v) }
+            builder.build()
+        } catch (e: Exception) {
+            finished(job)
+            return
+        }
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                finished(job)
+                if (BuildConfig.DEBUG) Log.d(TAG, "Не докачана ${job.url}: $e")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    response.use { resp ->
+                        if (!resp.isSuccessful) return
+                        val body = resp.body() ?: return
+                        val type = body.contentType()
+                        // Зеркало, отдающее страницу ошибки с кодом 200, не должно попасть в кэш навсегда
+                        if (type != null && type.type() != "image") return
+                        if (body.contentLength() > MAX_IMAGE_BYTES) return
+                        val bytes = body.bytes()
+                        if (bytes.isNotEmpty() && bytes.size <= MAX_IMAGE_BYTES) store(job.name, bytes)
+                    }
+                } catch (e: IOException) {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Не докачана ${job.url}: $e")
+                } finally {
+                    finished(job)
+                }
+            }
+        })
+    }
+
+    // ==================== ДИСК ====================
 
     /** «https://зеркало/image/t/p/w342/abc.jpg?x» → «w342_abc.jpg», не картинка TMDB — null. */
     private fun fileNameOf(url: String): String? {
@@ -171,49 +370,16 @@ object ImageCache {
         }
     }
 
-    /**
-     * Докачивает картинку на диск асинхронно, в потоках OkHttp — ни поток WebView, ни
-     * загрузку самой страницы это не задерживает. Сбой ничего не ломает: картинку уже
-     * грузит WebView, в кэш она попадёт при следующем промахе.
-     */
-    private fun prefetch(url: String, name: String, headers: Map<String, String>) {
-        if (pending.size >= PREFETCH_MAX_PENDING || !pending.add(name)) return
-        val request = try {
-            val builder = Request.Builder().url(url)
-            // Заголовки WebView (User-Agent, Referer, Accept) — зеркало должно видеть тот же запрос
-            // Accept-Encoding не копируем: с ним OkHttp перестаёт сам распаковывать gzip
-            headers.filterKeys { !it.equals("Accept-Encoding", ignoreCase = true) }
-                .forEach { (k, v) -> builder.header(k, v) }
-            builder.build()
-        } catch (e: Exception) {
-            pending.remove(name)
-            return
+    /** Картинка на диске? Заодно — свежая для LRU. Файл не открываем. */
+    private fun touch(name: String): Boolean {
+        synchronized(lock) { if (index[name] == null) return false }
+        val file = File(dir, name)
+        if (!file.exists()) {
+            forget(name)
+            return false
         }
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                pending.remove(name)
-                if (BuildConfig.DEBUG) Log.d(TAG, "Не докачана $url: $e")
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                try {
-                    response.use { resp ->
-                        if (!resp.isSuccessful) return
-                        val body = resp.body() ?: return
-                        val type = body.contentType()
-                        // Зеркало, отдающее страницу ошибки с кодом 200, не должно попасть в кэш навсегда
-                        if (type != null && type.type() != "image") return
-                        if (body.contentLength() > MAX_IMAGE_BYTES) return
-                        val bytes = body.bytes()
-                        if (bytes.isNotEmpty() && bytes.size <= MAX_IMAGE_BYTES) store(name, bytes)
-                    }
-                } catch (e: IOException) {
-                    if (BuildConfig.DEBUG) Log.d(TAG, "Не докачана $url: $e")
-                } finally {
-                    pending.remove(name)
-                }
-            }
-        })
+        file.setLastModified(System.currentTimeMillis())
+        return true
     }
 
     private fun store(name: String, bytes: ByteArray) {
