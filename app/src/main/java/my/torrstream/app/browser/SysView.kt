@@ -217,13 +217,15 @@ class SysView(override val mainActivity: MainActivity, override val viewResId: I
                 }
             }
 
-            // Картинки TMDB — из дискового кэша (ImageCache), трейлеры RuTube — с устройства
-            // (TrailerDirect), остальное как обычно
+            // Модули интерфейса с cash94.github.io — с диска (FrontendCache), картинки TMDB — из
+            // дискового кэша (ImageCache), трейлеры RuTube — с устройства (TrailerDirect),
+            // остальное как обычно
             override fun shouldInterceptRequest(
                 view: WebView?,
                 request: WebResourceRequest
             ): WebResourceResponse? =
-                ImageCache.intercept(request)
+                FrontendCache.intercept(request)
+                    ?: ImageCache.intercept(request)
                     ?: TrailerDirect.intercept(request)
                     ?: super.shouldInterceptRequest(view, request)
 
