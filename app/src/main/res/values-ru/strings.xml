@@ -218,6 +218,11 @@
     <string name="webview_engine_migrating">Переношу настройки в новый движок…</string>
     <string name="webview_engine_migrate_failed">Не удалось перенести настройки в новый движок: %s</string>
     <string name="back_key_menu">Кнопка «Назад» на пульте</string>
+    <string name="home_sidebar_menu">Боковое меню главной: %1$s</string>
+    <string name="home_sidebar_rows">Главная</string>
+    <string name="home_sidebar_hint">OK — перейти · ▶ или «Назад» — закрыть</string>
+    <string name="home_sidebar_enabled">Боковое меню включено: нажмите ◀ у левого края</string>
+    <string name="home_sidebar_disabled">Боковое меню выключено</string>
     <string name="back_key_title">Кнопка «Назад» на пульте</string>
     <string name="back_key_prompt">Нажмите кнопку пульта, которая должна работать как «Назад» (например, RETURN).</string>
     <string name="back_key_current">Сейчас назначена: %1$s</string>

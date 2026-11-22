@@ -100,6 +100,7 @@ import my.torrstream.app.helpers.Updater
 import my.torrstream.app.helpers.Prefs.appPrefs
 import my.torrstream.app.helpers.Prefs.appUrl
 import my.torrstream.app.helpers.Prefs.backHoldExit
+import my.torrstream.app.helpers.Prefs.homeSidebar
 import my.torrstream.app.helpers.Prefs.defPrefs
 import my.torrstream.app.helpers.Prefs.firstRun
 import my.torrstream.app.helpers.Prefs.lampaSource
@@ -188,6 +189,7 @@ class MainActivity : BaseActivity(),
         private const val EXTRA_BACKGROUND = "background"
         private const val EXTRA_TMDB_ID = "tmdb_id"
         private const val TAG = "APP_MAIN"
+        private const val HOME_SIDEBAR_ASSET = "home_sidebar.js"
         private const val RESULT_VIMU_ENDED = 2
         private const val RESULT_VIMU_START = 3
         private const val RESULT_VIMU_ERROR = 4
@@ -541,6 +543,8 @@ class MainActivity : BaseActivity(),
         WebViewEngine.markHealthy(this)
         // Switch Loader (Note it control delayedVoidJsFunc)
         dismissLoader(view)
+        // Скрипт сам дожидается главной, на чужих страницах её просто нет
+        if (isAppPage(url)) injectHomeSidebar()
 
         Log.d(TAG, "LAMPA onLoadFinished $url")
 
@@ -626,6 +630,33 @@ class MainActivity : BaseActivity(),
             append("})()")
         }
         browser?.evaluateJavascript(js) { }
+    }
+
+    /** Текст assets/home_sidebar.js: читаем один раз, страница перезагружается чаще. */
+    private val homeSidebarJs: String? by lazy {
+        runCatching { assets.open(HOME_SIDEBAR_ASSET).bufferedReader().use { it.readText() } }
+            .onFailure { Log.e(TAG, "home sidebar asset", it) }
+            .getOrNull()
+    }
+
+    /**
+     * Боковое меню подборок на главной — поверх веб-интерфейса, без его правок
+     * (см. assets/home_sidebar.js). Повторный вызов на той же странице только включает меню.
+     */
+    private fun injectHomeSidebar() {
+        if (!homeSidebar) return
+        val js = homeSidebarJs ?: return
+        val text = JSONObject()
+            .put("rows", getString(R.string.home_sidebar_rows))
+            .put("hint", getString(R.string.home_sidebar_hint))
+        browser?.evaluateJavascript("window.__tsSidebarText=$text;\n$js") { }
+    }
+
+    private fun toggleHomeSidebar() {
+        homeSidebar = !homeSidebar
+        if (homeSidebar) injectHomeSidebar()
+        else browser?.evaluateJavascript("window.__tsSidebar&&window.__tsSidebar.setEnabled(false)") { }
+        App.toast(if (homeSidebar) R.string.home_sidebar_enabled else R.string.home_sidebar_disabled)
     }
 
     private fun setupActivity() {
@@ -1581,6 +1612,14 @@ class MainActivity : BaseActivity(),
                 icon = R.drawable.ic_player_settings
             ),
             MenuItem(
+                title = getString(
+                    R.string.home_sidebar_menu,
+                    getString(if (homeSidebar) R.string.player_on else R.string.player_off)
+                ),
+                action = "toggleHomeSidebar",
+                icon = R.drawable.round_link_24
+            ),
+            MenuItem(
                 title = getString(R.string.back_key_menu),
                 action = "showBackKeyDialog",
                 icon = R.drawable.round_exit_to_app_24
@@ -1629,6 +1668,8 @@ class MainActivity : BaseActivity(),
                     "clearImageCache" -> clearImageCache()
 
                     "showBackKeyDialog" -> showBackKeyDialog()
+
+                    "toggleHomeSidebar" -> toggleHomeSidebar()
 
                     "showUrlInputDialog" -> {
                         App.toast(R.string.change_note)

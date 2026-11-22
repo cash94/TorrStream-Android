@@ -218,6 +218,11 @@
     <string name="webview_engine_migrating">Переношу налаштування в новий рушій…</string>
     <string name="webview_engine_migrate_failed">Не вдалося перенести налаштування в новий рушій: %s</string>
     <string name="back_key_menu">Кнопка «Назад» на пульті</string>
+    <string name="home_sidebar_menu">Бічне меню головної: %1$s</string>
+    <string name="home_sidebar_rows">Головна</string>
+    <string name="home_sidebar_hint">OK — перейти · ▶ або «Назад» — закрити</string>
+    <string name="home_sidebar_enabled">Бічне меню увімкнено: натисніть ◀ біля лівого краю</string>
+    <string name="home_sidebar_disabled">Бічне меню вимкнено</string>
     <string name="back_key_title">Кнопка «Назад» на пульті</string>
     <string name="back_key_prompt">Натисніть кнопку пульта, яка має працювати як «Назад» (наприклад, RETURN).</string>
     <string name="back_key_current">Зараз призначена: %1$s</string>

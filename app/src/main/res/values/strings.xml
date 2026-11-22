@@ -222,6 +222,11 @@
     <string name="webview_engine_migrating">Moving settings to the new engine…</string>
     <string name="webview_engine_migrate_failed">Settings could not be moved to the new engine: %s</string>
     <string name="back_key_menu">Remote “Back” button</string>
+    <string name="home_sidebar_menu">Home sidebar: %1$s</string>
+    <string name="home_sidebar_rows">Home</string>
+    <string name="home_sidebar_hint">OK — open · ▶ or “Back” — close</string>
+    <string name="home_sidebar_enabled">Home sidebar enabled: press ◀ at the left edge</string>
+    <string name="home_sidebar_disabled">Home sidebar disabled</string>
     <string name="back_key_title">Remote “Back” button</string>
     <string name="back_key_prompt">Press the remote button that should work as “Back” (for example, RETURN).</string>
     <string name="back_key_current">Assigned now: %1$s</string>

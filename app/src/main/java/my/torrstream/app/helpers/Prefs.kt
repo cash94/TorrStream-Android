@@ -34,6 +34,7 @@ object Prefs {
     private const val PLAYER_AUDIO_DECODER_KEY = "player_audio_decoder"
     private const val PLAYER_SUBTITLE_SIZE_KEY = "player_subtitle_size"
     private const val BACK_HOLD_EXIT_KEY = "back_hold_exit"
+    private const val HOME_SIDEBAR_KEY = "home_sidebar"
 
     /** Hardware first, software picked up whenever hardware cannot handle the track. */
     const val DECODER_COMBINED = 0
@@ -129,6 +130,14 @@ object Prefs {
     var Context.backHoldExit: Boolean
         get() = appPrefs.getBoolean(BACK_HOLD_EXIT_KEY, false)
         set(value) = appPrefs.edit { putBoolean(BACK_HOLD_EXIT_KEY, value) }
+
+    /**
+     * Боковое меню подборок на главной (assets/home_sidebar.js): «влево» с края открывает
+     * список подборок и разделов. Переключатель — в меню приложения.
+     */
+    var Context.homeSidebar: Boolean
+        get() = appPrefs.getBoolean(HOME_SIDEBAR_KEY, true)
+        set(value) = appPrefs.edit { putBoolean(HOME_SIDEBAR_KEY, value) }
 
     var Context.playerShowClock: Boolean
         get() = appPrefs.getBoolean(PLAYER_CLOCK_KEY, true)

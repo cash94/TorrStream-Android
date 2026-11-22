@@ -215,6 +215,11 @@
     <string name="webview_engine_migrating">正在将设置迁移到新内核…</string>
     <string name="webview_engine_migrate_failed">无法将设置迁移到新内核：%s</string>
     <string name="back_key_menu">遥控器“返回”键</string>
+    <string name="home_sidebar_menu">首页侧边菜单：%1$s</string>
+    <string name="home_sidebar_rows">首页</string>
+    <string name="home_sidebar_hint">OK — 打开 · ▶ 或“返回” — 关闭</string>
+    <string name="home_sidebar_enabled">已启用侧边菜单：在最左侧按 ◀</string>
+    <string name="home_sidebar_disabled">已关闭侧边菜单</string>
     <string name="back_key_title">遥控器“返回”键</string>
     <string name="back_key_prompt">请按下应作为“返回”的遥控器按键（例如 RETURN）。</string>
     <string name="back_key_current">当前已设置：%1$s</string>
