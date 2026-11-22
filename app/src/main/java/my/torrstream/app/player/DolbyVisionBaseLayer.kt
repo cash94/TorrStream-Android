@@ -31,6 +31,10 @@ import java.util.concurrent.ConcurrentHashMap
  * Подмена только для profile 7 и только если ни один декодер DV на устройстве этот формат
  * не берёт: где DV есть (NVIDIA SHIELD и т. п.), файл идёт как был. Profile 5 не трогаем —
  * его базовый слой в цветах IPT, через HEVC картинка будет зелёно-фиолетовой.
+ *
+ * [forceBaseLayer] — декодер DV есть, но не справился посреди фильма (TCL, Realtek
+ * OMX.realtek.video.dvhe.st.decoder на profile 8.1, 2 отчёта 1.1.38): тогда profile 7 и 8
+ * идут как HEVC независимо от декодеров — базовый слой у обоих HDR10 (8.4 — HLG).
  */
 @OptIn(UnstableApi::class)
 object DolbyVisionBaseLayer {
@@ -38,16 +42,30 @@ object DolbyVisionBaseLayer {
     private const val TAG = "DolbyVisionBaseLayer"
     private const val PROFILE_DUAL_LAYER_BD = 7
 
+    private const val PROFILE_SINGLE_LAYER_COMPATIBLE = 8
+
+    /** Играть DV profile 7/8 как HEVC при любых декодерах — откат после сбоя декодера DV. */
+    @Volatile
+    var forceBaseLayer = false
+
+    /** У формата есть HEVC-совместимый базовый слой (profile 7 или 8). */
+    fun hasHevcBaseLayer(format: Format?): Boolean =
+        format?.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION &&
+                profileOf(format.codecs) in setOf(PROFILE_DUAL_LAYER_BD, PROFILE_SINGLE_LAYER_COMPATIBLE)
+
     /** Ответ по строке codecs: декодеры за время жизни процесса не меняются. */
     private val decisions = ConcurrentHashMap<String, Boolean>()
 
     /** Формат как есть или он же как HEVC, если DV profile 7 на устройстве не декодируется. */
     fun adapt(format: Format): Format {
         if (format.sampleMimeType != MimeTypes.VIDEO_DOLBY_VISION) return format
-        if (profileOf(format.codecs) != PROFILE_DUAL_LAYER_BD) return format
-        val key = "${format.codecs}|${format.width}x${format.height}"
-        val toHevc = decisions.getOrPut(key) { shouldPlayAsHevc(format) }
-        if (!toHevc) return format
+        val forced = forceBaseLayer && hasHevcBaseLayer(format)
+        if (!forced) {
+            if (profileOf(format.codecs) != PROFILE_DUAL_LAYER_BD) return format
+            val key = "${format.codecs}|${format.width}x${format.height}"
+            val toHevc = decisions.getOrPut(key) { shouldPlayAsHevc(format) }
+            if (!toHevc) return format
+        }
         return format.buildUpon()
             .setSampleMimeType(MimeTypes.VIDEO_H265)
             // Профиль и уровень в строке — от DV, декодеру HEVC они ничего не скажут

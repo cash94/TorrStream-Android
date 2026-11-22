@@ -41,6 +41,7 @@ import java.lang.reflect.Method
  *   секунде) — это конец фильма: поток завершается, и плеер переходит к следующей серии.
  * - **«Top bit not zero»** — испорчена длина NAL внутри кадра (7 отчётов): тот же пропуск до
  *   следующего кластера.
+ * - **Размер элемента больше 2 ГБ** (ArrayIndexOutOfBoundsException в DefaultEbmlReader) — тоже.
  */
 @OptIn(UnstableApi::class)
 class MatroskaResyncExtractor(private val delegate: Extractor) : Extractor {
@@ -59,6 +60,11 @@ class MatroskaResyncExtractor(private val delegate: Extractor) : Extractor {
         recover(input, seekPosition, e)
     } catch (e: IllegalStateException) {
         if (!isDamagedData(e)) throw e
+        recover(input, seekPosition, e)
+    } catch (e: IndexOutOfBoundsException) {
+        // Размер элемента — мусор больше 2 ГБ: DefaultEbmlReader пропускает его как Int, и
+        // отрицательная длина роняет System.arraycopy (5 отчётов 1.1.32–1.1.38, посреди
+        // серии и на старте). Ввод при этом не сдвинулся — ищем кластер, как при порче
         recover(input, seekPosition, e)
     }
 

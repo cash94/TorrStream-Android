@@ -113,7 +113,9 @@ class PlayerStateManager(context: Context) {
         val episodeTitle: String? = null,
         val onlineSubs: String? = null,
         /** Line under the title logo, as the web player shows it: "Сезон 1 · Серия 5 · Название". */
-        val episodeLine: String? = null
+        val episodeLine: String? = null,
+        /** The episode's own TMDB name, without the number ("Зима близко"); absent if unknown. */
+        val episodeName: String? = null
     ) {
         /**
          * Data class representing playback timeline information.
@@ -758,7 +760,8 @@ class PlayerStateManager(context: Context) {
 
             episodeTitle = optString("episode_title").takeIf { it.isNotEmpty() },
             onlineSubs = optJSONObject("online_subs")?.toString(),
-            episodeLine = optString("episode_line").takeIf { it.isNotEmpty() }
+            episodeLine = optString("episode_line").takeIf { it.isNotEmpty() },
+            episodeName = optString("episode_name").takeIf { it.isNotEmpty() }
         )
     }
 
@@ -820,6 +823,7 @@ class PlayerStateManager(context: Context) {
         return JSONObject().apply {
             put("url", url)
             title?.let { put("title", it) }
+            thumbnail?.let { put("thumbnail", it) }
             timeline?.let { put("timeline", it.toJson()) }
             quality?.let { qual ->
                 put("quality", JSONObject().apply {
@@ -836,6 +840,7 @@ class PlayerStateManager(context: Context) {
             imdbId?.let { put("imdb_id", it) }
             episodeTitle?.let { put("episode_title", it) }
             episodeLine?.let { put("episode_line", it) }
+            episodeName?.let { put("episode_name", it) }
             onlineSubs?.let { put("online_subs", JSONObject(it)) }
         }
     }

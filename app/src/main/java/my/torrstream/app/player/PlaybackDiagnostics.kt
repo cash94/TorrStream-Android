@@ -77,6 +77,15 @@ object PlaybackDiagnostics {
     const val KIND_FAILED = "playback_failed"
     const val KIND_STREAM_RESTART = "stream_restart"
     const val KIND_FORMAT_UNSUPPORTED = "format_unsupported"
+    /** Декодер Dolby Vision не справился — дальше базовый слой HEVC (profile 7/8). */
+    const val KIND_DV_BASE_LAYER = "dv_base_layer_fallback"
+    /** Контейнер «не распознан» у файла с расширением видео — плеер открыл его заново. */
+    const val KIND_CONTAINER_RETRY = "container_retry"
+    /** Отчёт из «Диагностики» в настройках плеера: зритель сам описал проблему. */
+    const val KIND_USER_REPORT = "user_report"
+
+    /** Чем кончилась отправка — для ответа зрителю на ручной отчёт. */
+    enum class Result { SENT, QUEUED, SKIPPED }
 
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "playback-diagnostics").apply { isDaemon = true }
@@ -101,13 +110,25 @@ object PlaybackDiagnostics {
         /** Адрес TorrServer, если это его поток: у него спросим имя и размер файла. */
         val torrServer: String? = null,
         val torrHeaders: Map<String, String> = emptyMap(),
+        /** Что выбрал плеер для звука и видео и что с ними было ([PlaybackInfo]). */
+        val playback: JSONObject? = null,
+        /** Ручной отчёт: код проблемы («no_audio») — он же код ошибки в подписи сбоя. */
+        val problem: String? = null,
+        /** Адрес потока, чьи первые байты приложить к отчёту (контейнер не распознан). */
+        val probeUrl: String? = null,
     )
 
     /**
      * Отправить отчёт. [endpoint] — адрес /api/diagnostics на сервере страницы; null —
      * сервера нет (плеер открыт не из приложения), отчёт только в журнал.
      */
-    fun report(context: Context, endpoint: String?, clientId: String?, snapshot: Snapshot) {
+    fun report(
+        context: Context,
+        endpoint: String?,
+        clientId: String?,
+        snapshot: Snapshot,
+        onResult: ((Result) -> Unit)? = null,
+    ) {
         val app = context.applicationContext
         // Ошибка — до перехода в другой поток: из неё читаем только неизменяемые поля
         val errorJson = try {
@@ -116,6 +137,9 @@ object PlaybackDiagnostics {
             JSONObject().put("collectError", e.toString())
         }
         snapshot.failedMime?.let { if (!errorJson.has("mime")) errorJson.put("mime", it) }
+        snapshot.problem?.let { errorJson.put("codeName", it) }
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val answer = { r: Result -> onResult?.let { cb -> main.post { cb(r) } }; Unit }
 
         executor.execute {
             try {
@@ -126,11 +150,15 @@ object PlaybackDiagnostics {
                     snapshot.media.optString("hash"),
                     snapshot.media.optString("fileIndex"),
                 ).joinToString("|")
-                if (!allowed(app, dedupKey)) {
+                // Ручной отчёт зритель отправляет сам и ждёт ответа — его не глушим (лимит
+                // по адресу на сервере остаётся)
+                if (snapshot.problem == null && !allowed(app, dedupKey)) {
                     Log.i(TAG, "Skipped (already sent today or daily limit): $dedupKey")
+                    answer(Result.SKIPPED)
                     return@execute
                 }
                 addTorrentFile(snapshot)
+                snapshot.probeUrl?.let { url -> probeStream(url, snapshot.torrHeaders)?.let { snapshot.media.put("head", it) } }
 
                 val body = JSONObject().apply {
                     put("schema", SCHEMA)
@@ -143,6 +171,7 @@ object PlaybackDiagnostics {
                     put("error", errorJson)
                     put("media", snapshot.media)
                     put("player", snapshot.player)
+                    snapshot.playback?.let { put("playback", it) }
                     put("audio", audioJson(app))
                     put("ffmpeg", ffmpegJson())
                     // Как ExoPlayer выбирает декодеры для сломавшегося формата — по порядку
@@ -153,12 +182,20 @@ object PlaybackDiagnostics {
                 }
                 Log.i(TAG, "Report ${snapshot.kind}: ${snapshot.reason}")
 
-                if (endpoint == null) return@execute
+                if (endpoint == null) {
+                    answer(Result.QUEUED)
+                    return@execute
+                }
                 flushPending(app, endpoint)
-                if (!post(endpoint, body.toString())) savePending(app, body.toString())
+                if (post(endpoint, body.toString())) answer(Result.SENT)
+                else {
+                    savePending(app, body.toString())
+                    answer(Result.QUEUED)
+                }
             } catch (e: Throwable) {
                 // Диагностика не должна мешать ничему, даже самой себе
                 Log.w(TAG, "Report failed: $e")
+                answer(Result.QUEUED)
             }
         }
     }
@@ -207,6 +244,48 @@ object PlaybackDiagnostics {
             }
         } catch (e: Exception) {
             Log.d(TAG, "TorrServer file info unavailable: ${e.message}")
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    /**
+     * Что поток отдаёт с начала файла: код ответа, тип, длина и первые 64 байта в hex. MKV,
+     * который «никто не распознал», — это не MKV на входе: HTML-страница ошибки, пустой ответ
+     * или данные не с того места. По этим байтам видно, что именно пришло.
+     */
+    private fun probeStream(url: String, headers: Map<String, String>): JSONObject? {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 8_000
+                readTimeout = 8_000
+                setRequestProperty("Range", "bytes=0-63")
+                headers.forEach { (key, value) -> setRequestProperty(key, value) }
+            }
+            val code = connection.responseCode
+            JSONObject().apply {
+                put("http", code)
+                connection.contentType?.let { put("contentType", it.take(100)) }
+                connection.getHeaderField("Content-Range")?.let { put("contentRange", it.take(100)) }
+                connection.getHeaderField("Content-Length")?.let { put("contentLength", it.take(30)) }
+                val stream = if (code >= 400) connection.errorStream else connection.inputStream
+                val bytes = stream?.use { input ->
+                    val buf = ByteArray(64)
+                    var n = 0
+                    while (n < buf.size) {
+                        val r = input.read(buf, n, buf.size - n)
+                        if (r < 0) break
+                        n += r
+                    }
+                    buf.copyOf(n)
+                } ?: ByteArray(0)
+                put("bytes", bytes.size)
+                put("hex", bytes.joinToString("") { "%02x".format(it) })
+                put("text", String(bytes, Charsets.ISO_8859_1).map { if (it in ' '..'~') it else '.' }.joinToString(""))
+            }
+        } catch (e: Exception) {
+            JSONObject().put("probeError", "${e.javaClass.simpleName}: ${e.message?.take(150)}")
         } finally {
             connection?.disconnect()
         }

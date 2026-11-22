@@ -31,6 +31,7 @@ object Prefs {
     private const val PLAYER_DECODER_KEY = "player_decoder"
     private const val PLAYER_ENGINE_KEY = "player_engine"
     private const val PLAYER_AUDIO_KEY = "player_audio"
+    private const val PLAYER_AUDIO_DECODER_KEY = "player_audio_decoder"
     private const val PLAYER_SUBTITLE_SIZE_KEY = "player_subtitle_size"
     private const val BACK_HOLD_EXIT_KEY = "back_hold_exit"
 
@@ -56,6 +57,15 @@ object Prefs {
     const val AUDIO_AUTO = 1
     /** Битстрим AC3/E-AC3/DTS всегда, даже если устройство о поддержке не сообщает. */
     const val AUDIO_PASSTHROUGH = 2
+
+    /** Декодер звука встроенного плеера: декодер устройства, FFmpeg — если тот не справился. */
+    const val AUDIO_DECODER_AUTO = 0
+    /**
+     * Звук всегда декодирует FFmpeg, видео — как задано «Декодером». Для устройств, чей
+     * аппаратный декодер звука молча отдаёт тишину: «программный» режим целиком спасал звук,
+     * но и видео уводил на процессор.
+     */
+    const val AUDIO_DECODER_FFMPEG = 1
 
     /**
      * Размер субтитров встроенного плеера — те же пять уровней, что у веб-плеера
@@ -138,6 +148,11 @@ object Prefs {
     var Context.playerAudioMode: Int
         get() = appPrefs.getInt(PLAYER_AUDIO_KEY, AUDIO_PCM)
         set(value) = appPrefs.edit { putInt(PLAYER_AUDIO_KEY, value) }
+
+    /** Встроенный плеер: чем декодировать звук — одна из констант AUDIO_DECODER_*. */
+    var Context.playerAudioDecoder: Int
+        get() = appPrefs.getInt(PLAYER_AUDIO_DECODER_KEY, AUDIO_DECODER_AUTO)
+        set(value) = appPrefs.edit { putInt(PLAYER_AUDIO_DECODER_KEY, value) }
 
     /** Встроенный плеер: уровень размера субтитров — индекс в PLAYER_SUBTITLE_SCALES. */
     var Context.playerSubtitleSize: Int

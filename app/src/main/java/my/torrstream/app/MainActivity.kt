@@ -181,6 +181,12 @@ class MainActivity : BaseActivity(),
         // Constants
         const val VIDEO_COMPLETED_DURATION_MAX_PERCENTAGE = 96
         private const val EXTRA_TITLE_BASE = "title_base"
+        // Логотип, название и фон TMDB и id фильма — для внешних плееров (Just+): у
+        // TorrStream нет карточки Lampa, из которой их берёт Lampa
+        private const val EXTRA_TITLE_LOGO = "title_logo"
+        private const val EXTRA_TITLE_NAME = "title_name"
+        private const val EXTRA_BACKGROUND = "background"
+        private const val EXTRA_TMDB_ID = "tmdb_id"
         private const val TAG = "APP_MAIN"
         private const val RESULT_VIMU_ENDED = 2
         private const val RESULT_VIMU_START = 3
@@ -2720,6 +2726,17 @@ class MainActivity : BaseActivity(),
                     // Series name without the episode, for players that show the episode themselves
                     jsonObject.optString("title_base").takeIf { it.isNotBlank() }
                         ?.let { put(EXTRA_TITLE_BASE, it) }
+                    jsonObject.optString("title_logo").takeIf { it.startsWith("http") }
+                        ?.let { put(EXTRA_TITLE_LOGO, it) }
+                    jsonObject.optString("title_name").takeIf { it.isNotBlank() }
+                        ?.let { put(EXTRA_TITLE_NAME, it) }
+                    jsonObject.optString("background").takeIf { it.startsWith("http") }
+                        ?.let { put(EXTRA_BACKGROUND, it) }
+                    // tmdb_id — id раздачи у веба; id — у запуска из поиска (только цифры:
+                    // у карточек CUB/KP там бывают «KP_123»)
+                    (jsonObject.optString("tmdb_id").takeIf { id -> id.isNotEmpty() && id.all { it.isDigit() } }
+                        ?: jsonObject.optString("id").takeIf { id -> id.isNotEmpty() && id.all { it.isDigit() } })
+                        ?.let { put(EXTRA_TMDB_ID, it) }
                 }
                 // save new state
                 playerStateManager.saveState(
@@ -3385,22 +3402,33 @@ class MainActivity : BaseActivity(),
         val cardImdbId = card?.imdb_id?.takeIf { it.isNotEmpty() }
         // TMDB id only: CUB/KP cards carry "KP_123" or UUIDs there, which would mislead the player.
         val cardTmdbId = card?.id?.takeIf { id -> id.isNotEmpty() && id.all { it.isDigit() } }
-        // Just+ adds "Season N · Episode N" itself: the web's title_base minus its " · Сезон N"
-        val seriesTitle = (state.extras[EXTRA_TITLE_BASE] as? String)
-            ?.replace(Regex("""\s*·\s*Сезон\s+\d+\s*$"""), "")
-            ?.takeIf { it.isNotBlank() }
+            ?: (state.extras[EXTRA_TMDB_ID] as? String)?.takeIf { id -> id.isNotEmpty() && id.all { it.isDigit() } }
+        // Название TMDB, как у Lampa; без него — title_base веба без « · Сезон N» (Just+
+        // пишет «Сезон N · Серия N» сам)
+        val tmdbName = (state.extras[EXTRA_TITLE_NAME] as? String)?.takeIf { it.isNotBlank() }
+        val seriesTitle = tmdbName
+            ?: (state.extras[EXTRA_TITLE_BASE] as? String)
+                ?.replace(Regex("""\s*·\s*Сезон\s+\d+\s*$"""), "")
+                ?.takeIf { it.isNotBlank() }
             ?: (card?.name ?: card?.title)?.takeIf { it.isNotBlank() } ?: videoTitle
+        // Логотип вместо названия (Just+ сам вернётся к названию, если он не загрузится)
+        val logo = (state.extras[EXTRA_TITLE_LOGO] as? String)?.takeIf { it.startsWith("http") }
         val background = card?.background_image?.takeIf { it.startsWith("http") }
             ?: card?.backdrop_path?.takeIf { it.isNotEmpty() }
                 ?.let { TMDB.imageUrl(it).replace("original", "w1280") }
                 ?.takeIf { it.startsWith("http") }
+            ?: (state.extras[EXTRA_BACKGROUND] as? String)?.takeIf { it.startsWith("http") }
 
         val startIndex = state.currentIndex.coerceIn(0, (state.playlist.size - 1).coerceAtLeast(0))
         val items = state.playlist.mapIndexed { index, item ->
             Bundle().apply {
                 putString("uri", item.url)
-                if (state.playlist.size == 1) putString("title", videoTitle)
-                (item.episodeTitle ?: item.title)?.takeIf { it.isNotBlank() && it != seriesTitle }
+                // Фильм: название TMDB, а не имя раздачи с качеством и озвучкой
+                if (state.playlist.size == 1) putString("title", tmdbName ?: videoTitle)
+                // Серия: своё название TMDB («Зима близко») — номер Just+ допишет сам; без
+                // него — подпись веба («Серия 1 - …»), её Just+ прячет, если там только номер
+                (item.episodeName ?: item.episodeTitle ?: item.title)
+                    ?.takeIf { it.isNotBlank() && it != seriesTitle && (state.playlist.size > 1 || item.episodeName != null) }
                     ?.let { putString("episode_title", it) }
                 item.thumbnail?.takeIf { it.startsWith("http") }?.let { putString("thumbnail", it) }
                 (item.imdbId ?: cardImdbId)?.let { putString("imdb_id", it) }
@@ -3445,6 +3473,7 @@ class MainActivity : BaseActivity(),
 
         val playlist = Bundle().apply {
             putString("title", seriesTitle)
+            logo?.let { putString("logo", it) }
             background?.let { putString("background", it) }
             putInt("start_index", startIndex)
             headers?.let { putStringArray("headers", it) }

@@ -64,6 +64,7 @@ import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.Cue
+import androidx.media3.common.util.StuckPlayerException
 import androidx.media3.common.util.UnstableApi
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.DataSource
@@ -103,6 +104,7 @@ import androidx.media3.ui.SubtitleView
 import my.torrstream.app.App
 import my.torrstream.app.R
 import my.torrstream.app.helpers.Prefs
+import my.torrstream.app.helpers.Prefs.playerAudioDecoder
 import my.torrstream.app.helpers.Prefs.playerAudioMode
 import my.torrstream.app.helpers.Prefs.playerBufferMb
 import my.torrstream.app.helpers.Prefs.playerDecoderMode
@@ -307,6 +309,10 @@ class InternalPlayerActivity : AppCompatActivity() {
          */
         private const val ZOOM_FACTOR = 2.4f / (16f / 9f)
         private const val SCALE_TOAST_MS = 1500L
+
+        private const val MAX_CONTAINER_RETRIES = 2
+        private const val CONTAINER_RETRY_DELAY_MS = 2_000L
+        private const val AUDIO_OUTPUT_RETRY_DELAY_MS = 2_500L
     }
 
     /** ExoPlayer, а для того, что он не может декодировать, — libVLC ([VlcPlayer]). */
@@ -401,6 +407,19 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     /** С какой позиции был последний такой перезапуск (-1 — не было): продвинулись ли после него. */
     private var lastStreamRestartAt = -1L
+
+    /**
+     * Повторы открытия, когда контейнер файла «не распознан» ни одним разборщиком: в отчётах
+     * это обычные MKV серий (8 отчётов 1.1.34–1.1.38), то есть TorrServer отдал не те байты
+     * (пусто, страницу ошибки). Повтор — до перехода в libVLC.
+     */
+    private var containerRetries = 0
+
+    /** Звуковой выход не создался и в «безопасном» режиме — ещё одна попытка с паузой. */
+    private var audioOutputRetried = false
+
+    /** Что выбрал плеер для звука и видео и что с ними было — «Диагностика» и отчёты. */
+    private val playbackInfo = PlaybackInfo()
     private val startedAt = SystemClock.elapsedRealtime()
 
     /** Set when the player is rebuilt (buffer change) so playback resumes where it left off. */
@@ -537,6 +556,8 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         usingVlc = playerEngine == Prefs.ENGINE_VLC
+        // Откат на базовый слой DV — только для того фильма, на котором сломался декодер
+        DolbyVisionBaseLayer.forceBaseLayer = false
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         // Видео — на весь экран, как и интерфейс: без этого у телефона с вырезом под
@@ -922,7 +943,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         }
         // Откат звука: FFmpeg первым — у него нет своих причуд с выходом, как у декодеров
         // Dolby/DTS в прошивках. Видео это не касается: его FFmpeg ставит buildVideoRenderers.
-        return if (safeAudioFallback) {
+        // Так же — «Декодер звука: FFmpeg»: аппаратный декодер звука молчит, видео — на железе
+        return if (safeAudioFallback || playerAudioDecoder == Prefs.AUDIO_DECODER_FFMPEG) {
             configured
                 .setEnableDecoderFallback(true)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
@@ -999,6 +1021,12 @@ class InternalPlayerActivity : AppCompatActivity() {
                         getString(audioLabelRes(playerAudioMode)),
                 R.string.player_audio_desc,
             ),
+            withDescription(
+                "${getString(R.string.player_audio_decoder)}: " +
+                        getString(audioDecoderLabelRes(playerAudioDecoder)),
+                R.string.player_audio_decoder_desc,
+            ),
+            withDescription(getString(R.string.player_diagnostics), R.string.player_diagnostics_desc),
         )
         val actions = listOf<() -> Unit>(
             {
@@ -1012,6 +1040,8 @@ class InternalPlayerActivity : AppCompatActivity() {
             { showDecoderPanel() },
             { showEnginePanel() },
             { showAudioPanel() },
+            { showAudioDecoderPanel() },
+            { showDiagnosticsPanel() },
         )
         showSidePanel(
             titleRes = R.string.player_settings,
@@ -1176,6 +1206,94 @@ class InternalPlayerActivity : AppCompatActivity() {
         )
     }
 
+    private fun audioDecoderLabelRes(mode: Int) = when (mode) {
+        Prefs.AUDIO_DECODER_FFMPEG -> R.string.player_audio_decoder_ffmpeg
+        else -> R.string.player_audio_decoder_auto
+    }
+
+    private fun showAudioDecoderPanel() {
+        val modes = listOf(Prefs.AUDIO_DECODER_AUTO, Prefs.AUDIO_DECODER_FFMPEG)
+        showSidePanel(
+            titleRes = R.string.player_audio_decoder,
+            labels = modes.map {
+                withDescription(
+                    getString(audioDecoderLabelRes(it)),
+                    if (it == Prefs.AUDIO_DECODER_FFMPEG) R.string.player_audio_decoder_ffmpeg_desc
+                    else R.string.player_audio_decoder_auto_desc,
+                )
+            },
+            checkedIndex = modes.indexOf(playerAudioDecoder),
+            actions = modes.map { mode -> { applyAudioDecoder(mode) } },
+            opener = btnSettings,
+            itemLayout = R.layout.item_side_panel_desc,
+            back = { showSettingsPanel() },
+        )
+    }
+
+    /** Декодеры выбираются при сборке плеера — пересобираем с той же позиции. */
+    private fun applyAudioDecoder(mode: Int) {
+        if (mode == playerAudioDecoder) return
+        playerAudioDecoder = mode
+        restartPlayer("audio decoder $mode")
+    }
+
+    /**
+     * «Диагностика»: что сейчас играет и чем — и отчёт разработчику, когда что-то не так, а
+     * ошибки нет (звука нет, но с программным декодером есть). Строки сведений — по нажатию
+     * обновляются; ниже — «Сообщить: …», отчёт уходит на сервер с описанием проблемы.
+     */
+    private fun showDiagnosticsPanel(focusIndex: Int = -1) {
+        val info = if (usingVlc) listOf(getString(R.string.player_diag_engine, "libVLC"))
+        else playbackInfo.lines(this, "ExoPlayer · Media3 ${androidx.media3.common.MediaLibraryInfo.VERSION}")
+        val problems = listOf(
+            "no_audio" to R.string.player_report_no_audio,
+            "no_video" to R.string.player_report_no_video,
+            "stutter" to R.string.player_report_stutter,
+            "other" to R.string.player_report_other,
+        )
+        val labels = info.map<String, CharSequence> { it } + problems.map { (_, res) ->
+            withDescription(getString(res), R.string.player_report_desc)
+        }
+        val actions = info.indices.map { index -> { showDiagnosticsPanel(index) } } +
+                problems.map { (code, _) -> { sendUserReport(code) } }
+        showSidePanel(
+            titleRes = R.string.player_diagnostics,
+            labels = labels,
+            checkedIndex = -1,
+            actions = actions,
+            opener = btnSettings,
+            itemLayout = R.layout.item_side_panel_desc,
+            back = { showSettingsPanel() },
+            focusIndex = if (focusIndex >= 0) focusIndex else info.size,
+        )
+    }
+
+    /** Ручной отчёт из «Диагностики»: проблема со слов зрителя и всё, что знает плеер. */
+    private fun sendUserReport(problem: String) {
+        val exo = player as? ExoPlayer
+        val mime = when (problem) {
+            "no_audio" -> exo?.audioFormat?.sampleMimeType
+            else -> exo?.videoFormat?.sampleMimeType
+        }
+        App.toast(R.string.player_report_sending, false)
+        reportDiagnostics(
+            PlaybackDiagnostics.KIND_USER_REPORT,
+            "user: $problem",
+            null,
+            mime,
+            problem = problem,
+        ) { result ->
+            if (isFinishing || isDestroyed) return@reportDiagnostics
+            val message = when (result) {
+                PlaybackDiagnostics.Result.SENT ->
+                    if (problem == "no_audio" && playerAudioDecoder != Prefs.AUDIO_DECODER_FFMPEG && !usingVlc)
+                        R.string.player_report_sent_no_audio else R.string.player_report_sent
+                else -> R.string.player_report_queued
+            }
+            App.toast(message, true)
+        }
+    }
+
     /** Выход звука собирается вместе с плеером — пересобираем с той же позиции. */
     private fun applyAudioMode(mode: Int) {
         if (mode == playerAudioMode && !pcmAudioFallback && !safeAudioFallback) return
@@ -1220,7 +1338,11 @@ class InternalPlayerActivity : AppCompatActivity() {
      * position, so the change lands on what is playing rather than waiting for the next file —
      * which is the point of reaching for these mid-film.
      */
+    /** Почему собирается плеер — первой строкой в журнале [PlaybackInfo]. */
+    private var lastBuildReason = "start"
+
     private fun restartPlayer(what: String, startAtMs: Long? = null) {
+        lastBuildReason = what
         rememberResumePoint()
         if (startAtMs != null) resumePositionMs = startAtMs
 
@@ -2916,6 +3038,11 @@ class InternalPlayerActivity : AppCompatActivity() {
     }
 
     /** (адрес TorrServer, хэш) текущего элемента; null — это не поток TorrServer. */
+    /** Адрес потока текущего элемента очереди (http/https) или null. */
+    private fun currentStreamUrl(): String? =
+        (player?.currentMediaItem?.localConfiguration?.uri ?: intent.data)?.toString()
+            ?.takeIf { it.startsWith("http") }
+
     private fun currentTorrTarget(): Pair<String, String>? {
         val uri = player?.currentMediaItem?.localConfiguration?.uri ?: intent.data ?: return null
         val path = uri.path ?: return null
@@ -2973,7 +3100,15 @@ class InternalPlayerActivity : AppCompatActivity() {
      * Отчёт о сбое на сервер ([PlaybackDiagnostics]). Зовётся до того, как откат поменяет
      * состояние: в отчёт попадает то, на чём сломалось, а не то, на что переключаемся.
      */
-    private fun reportDiagnostics(kind: String, reason: String, error: PlaybackException?, failedMime: String? = null) {
+    private fun reportDiagnostics(
+        kind: String,
+        reason: String,
+        error: PlaybackException?,
+        failedMime: String? = null,
+        problem: String? = null,
+        probeStream: Boolean = false,
+        onResult: ((PlaybackDiagnostics.Result) -> Unit)? = null,
+    ) {
         val elapsed = SystemClock.elapsedRealtime() - startedAt
         fallbackSteps.put(
             JSONObject()
@@ -2997,10 +3132,15 @@ class InternalPlayerActivity : AppCompatActivity() {
                     player = diagnosticsPlayer(),
                     torrServer = target?.first,
                     torrHeaders = torrHeaders,
+                    playback = if (usingVlc) null else playbackInfo.toJson(this),
+                    problem = problem,
+                    probeUrl = if (probeStream) currentStreamUrl() else null,
                 ),
+                onResult,
             )
         } catch (e: Throwable) {
             Log.w(TAG, "Diagnostics snapshot failed: $e")
+            onResult?.invoke(PlaybackDiagnostics.Result.QUEUED)
         }
     }
 
@@ -3046,6 +3186,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             else -> "combined"
         })
         put("audioMode", audioModeName(playerAudioMode))
+        put("audioDecoder", if (playerAudioDecoder == Prefs.AUDIO_DECODER_FFMPEG) "ffmpeg" else "auto")
         put("effectiveAudioMode", audioModeName(audioMode))
         put("audioLimit", audioLimit.name)
         put("usbAudio", usbAudio)
@@ -3229,7 +3370,8 @@ class InternalPlayerActivity : AppCompatActivity() {
                 // Без автопереключения серий ExoPlayer встаёт в конце серии, а не уходит на
                 // следующую: плеер закроется на ней же (onPlayWhenReadyChanged)
                 exo.pauseAtEndOfMediaItems = !autoNext
-                exo.addAnalyticsListener(videoDecoderLog)
+                playbackInfo.onPlayerBuilt(lastBuildReason)
+                exo.addAnalyticsListener(playbackInfo)
                 ass.attach(exo) { handler.post { restartPlayer("ASS in the preloaded item") } }
                 assSubtitles = ass
             }
@@ -3465,7 +3607,10 @@ class InternalPlayerActivity : AppCompatActivity() {
             // приходит как PLAYLIST_CHANGED — та же серия, её не считаем)
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
                 reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK
-            ) lastStreamRestartAt = -1L
+            ) {
+                lastStreamRestartAt = -1L
+                containerRetries = 0
+            }
             skipRanges = emptyList()
             offeredSkipKeys.clear()
             hideSkipButton()
@@ -3530,6 +3675,22 @@ class InternalPlayerActivity : AppCompatActivity() {
                 return
             }
 
+            // Декодер Dolby Vision устройства сломался посреди фильма (TCL, Realtek, profile
+            // 8.1): у profile 7 и 8 под DV — обычный HEVC HDR10, его и играем с того же места,
+            // а не уходим в libVLC
+            val failedFormat = (error as? ExoPlaybackException)?.rendererFormat
+            if (!usingVlc &&
+                !DolbyVisionBaseLayer.forceBaseLayer &&
+                error.isVideoFailure() &&
+                DolbyVisionBaseLayer.hasHevcBaseLayer(failedFormat)
+            ) {
+                reportDiagnostics(PlaybackDiagnostics.KIND_DV_BASE_LAYER, "Dolby Vision decoder failed, playing the HEVC base layer", error)
+                DolbyVisionBaseLayer.forceBaseLayer = true
+                Log.w(TAG, "Dolby Vision decoder failed (${failedFormat?.codecs}), retrying as HEVC: ${error.errorCodeName}")
+                handler.post { restartPlayer("Dolby Vision base layer") }
+                return
+            }
+
             // What "combined" is supposed to mean. ExoPlayer's own decoder fallback only
             // covers a decoder that fails to *initialise*; a decoder that starts and then chokes
             // partway through — which is how MPEG-4 in AVI tends to fail — never reached the
@@ -3553,10 +3714,13 @@ class InternalPlayerActivity : AppCompatActivity() {
 
             // Ресивер (или система) не принял битстрим: AudioTrack с AC3/DTS не создаётся.
             // Звук декодируем сами — с той же позиции, только для этого файла.
+            // Битстрим может и не отказать, а встать: выход открыт, но не играет, и позиция
+            // стоит — Media3 через 10 с сдаётся («stuck playing», 4 из 5 таких отчётов — с
+            // AC3/E-AC3/DTS битстримом на TCL и Xiaomi). Это тоже отказ выхода.
             if (!usingVlc &&
                 !pcmAudioFallback &&
                 audioMode != Prefs.AUDIO_PCM &&
-                error.errorCode in AUDIO_OUTPUT_ERRORS
+                (error.errorCode in AUDIO_OUTPUT_ERRORS || error.isStuckPlaying())
             ) {
                 reportDiagnostics(PlaybackDiagnostics.KIND_PCM_AUDIO, "audio passthrough failed", error)
                 pcmAudioFallback = true
@@ -3571,13 +3735,52 @@ class InternalPlayerActivity : AppCompatActivity() {
             // только если не поможет и это
             if (!usingVlc &&
                 !safeAudioFallback &&
-                (error.errorCode in AUDIO_OUTPUT_ERRORS || error.isAudioDecoderError())
+                (error.errorCode in AUDIO_OUTPUT_ERRORS || error.isAudioDecoderError() ||
+                        (error.isStuckPlaying() && (player as? ExoPlayer)?.audioFormat != null))
             ) {
                 reportDiagnostics(PlaybackDiagnostics.KIND_SAFE_AUDIO, "audio failed (USB: $usbAudio)", error)
                 safeAudioFallback = true
                 Log.w(TAG, "Audio failed (USB: $usbAudio), retrying stereo 16-bit: ${error.errorCodeName}")
                 App.toast(R.string.player_audio_safe_fallback, true)
                 handler.post { restartPlayer("safe audio fallback") }
+                return
+            }
+
+            // Выход не создаётся и в стерео 16 бит («Cannot create AudioTrack», Sony BRAVIA 2015,
+            // Android 7 — на смене серии): прежние звуковые выходы освобождаются в фоне, и
+            // аудиосистема ещё не отпустила их. Ещё раз — после паузы, а не закрываться
+            if (!usingVlc && safeAudioFallback && !audioOutputRetried && error.errorCode in AUDIO_OUTPUT_ERRORS) {
+                audioOutputRetried = true
+                fallbackSteps.put(
+                    JSONObject().put("kind", "audio_output_retry").put("code", error.errorCodeName)
+                        .put("atMs", SystemClock.elapsedRealtime() - startedAt),
+                )
+                Log.w(TAG, "Audio output failed again, retrying after a pause: ${error.errorCodeName}")
+                handler.postDelayed({
+                    if (!isFinishing && !stoppedInBackground) restartPlayer("audio output retry")
+                }, AUDIO_OUTPUT_RETRY_DELAY_MS)
+                return
+            }
+
+            // Контейнер «не распознан» у потока TorrServer: в отчётах это обычные MKV серий,
+            // которые libVLC потом играл, — на входе были не те байты. Открыть заново (с
+            // первыми байтами ответа в отчёте, чтобы понять, что приходит), потом — libVLC
+            if (!usingVlc &&
+                error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED &&
+                containerRetries < MAX_CONTAINER_RETRIES &&
+                currentTorrTarget() != null
+            ) {
+                containerRetries++
+                reportDiagnostics(
+                    PlaybackDiagnostics.KIND_CONTAINER_RETRY,
+                    "container not recognized, reopening #$containerRetries",
+                    error,
+                    probeStream = true,
+                )
+                Log.w(TAG, "Container not recognized, reopening #$containerRetries")
+                handler.postDelayed({
+                    if (!isFinishing && !stoppedInBackground) restartPlayer("container retry")
+                }, CONTAINER_RETRY_DELAY_MS)
                 return
             }
 
@@ -3622,7 +3825,10 @@ class InternalPlayerActivity : AppCompatActivity() {
                     showFormatUnsupported(it, (error as ExoPlaybackException).rendererFormat?.sampleMimeType)
                     return
                 }
-                reportDiagnostics(PlaybackDiagnostics.KIND_VLC, "ExoPlayer failed: ${error.errorCodeName}", error)
+                reportDiagnostics(
+                    PlaybackDiagnostics.KIND_VLC, "ExoPlayer failed: ${error.errorCodeName}", error,
+                    probeStream = error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+                )
                 switchToVlc("${error.errorCodeName} ${error.formatDetail().orEmpty()}")
                 return
             }
@@ -3659,6 +3865,19 @@ class InternalPlayerActivity : AppCompatActivity() {
                 listOfNotNull(format.sampleMimeType, format.codecs).joinToString(" ")
                     .takeIf { it.isNotBlank() }
             }
+
+        /** Media3 сдалась: плеер «играет», а позиция 10 с не двигается — встал звуковой выход. */
+        private fun PlaybackException.isStuckPlaying(): Boolean {
+            if (errorCode != PlaybackException.ERROR_CODE_TIMEOUT) return false
+            var cause: Throwable? = this
+            while (cause != null) {
+                if (cause is StuckPlayerException) {
+                    return cause.stuckType == StuckPlayerException.STUCK_PLAYING_NO_PROGRESS
+                }
+                cause = cause.cause
+            }
+            return false
+        }
 
         private fun PlaybackException.isSurfaceDetachTimeout(): Boolean {
             if (errorCode != PlaybackException.ERROR_CODE_TIMEOUT) return false
@@ -3756,32 +3975,6 @@ class InternalPlayerActivity : AppCompatActivity() {
         resumeIndex = p.currentMediaItemIndex
         resumePositionMs = p.currentPosition.coerceAtLeast(0L)
         resumeTrackParams = p.trackSelectionParameters
-    }
-
-    /**
-     * Каким декодером идёт видео (MediaCodec или программный FFmpeg) и сколько кадров он
-     * потерял — в logcat, для разбора «тормозит» и отчётов.
-     */
-    private val videoDecoderLog = object : AnalyticsListener {
-        override fun onVideoDecoderInitialized(
-            eventTime: AnalyticsListener.EventTime,
-            decoderName: String,
-            initializedTimestampMs: Long,
-            initializationDurationMs: Long,
-        ) {
-            Log.i(TAG, "Video decoder: $decoderName")
-        }
-
-        override fun onVideoDisabled(eventTime: AnalyticsListener.EventTime, decoderCounters: DecoderCounters) {
-            decoderCounters.ensureUpdated()
-            Log.i(
-                TAG,
-                "Video frames: rendered ${decoderCounters.renderedOutputBufferCount}, " +
-                        "dropped ${decoderCounters.droppedBufferCount}, " +
-                        "skipped ${decoderCounters.skippedOutputBufferCount}, " +
-                        "max consecutive dropped ${decoderCounters.maxConsecutiveDroppedBufferCount}",
-            )
-        }
     }
 
     private fun releasePlayer() {
