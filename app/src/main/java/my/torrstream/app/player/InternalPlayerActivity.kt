@@ -549,9 +549,14 @@ class InternalPlayerActivity : AppCompatActivity() {
     private val autoNext: Boolean
         get() = intent.getBooleanExtra(Extras.AUTO_NEXT, true)
 
-    /** Автопропуск заставки и титров ([Extras.AUTO_SKIP]). */
+    /**
+     * Автопропуск заставки и титров ([Extras.AUTO_SKIP]). Переключается и в шестерёнке
+     * плеера — тогда новое значение уходит в результат ([Extras.AUTO_SKIP]), и веб
+     * сохраняет его у себя (setAutoSkip), как свою галку «Автопропуск заставки и титров».
+     */
+    private var autoSkipOverride: Boolean? = null
     private val autoSkip: Boolean
-        get() = intent.getBooleanExtra(Extras.AUTO_SKIP, false)
+        get() = autoSkipOverride ?: intent.getBooleanExtra(Extras.AUTO_SKIP, false)
     private var resultDelivered = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -991,7 +996,12 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     private fun showSettingsPanel() {
         val clockState = getString(if (playerShowClock) R.string.player_on else R.string.player_off)
+        val autoSkipState = getString(if (autoSkip) R.string.player_on else R.string.player_off)
         val labels = listOf(
+            withDescription(
+                "${getString(R.string.player_auto_skip)}: $autoSkipState",
+                R.string.player_auto_skip_desc,
+            ),
             withDescription(
                 "${getString(R.string.player_clock)}: $clockState",
                 R.string.player_clock_desc,
@@ -1029,6 +1039,11 @@ class InternalPlayerActivity : AppCompatActivity() {
             withDescription(getString(R.string.player_diagnostics), R.string.player_diagnostics_desc),
         )
         val actions = listOf<() -> Unit>(
+            {
+                autoSkipOverride = !autoSkip
+                syncAutoSkip()
+                showSettingsPanel()
+            },
             {
                 playerShowClock = !playerShowClock
                 applyClockVisibility()
@@ -1940,6 +1955,18 @@ class InternalPlayerActivity : AppCompatActivity() {
             .setDuration(durationMs)
             .setInterpolator(LinearInterpolator())
             .start()
+    }
+
+    /**
+     * Автопропуск переключили, пока кнопка пропуска на экране (как syncAutoSkipCountdown
+     * веб-плеера): включили — заводим отсчёт, выключили — обычная кнопка на своё время.
+     */
+    private fun syncAutoSkip() {
+        val range = activeSkipRange ?: return
+        if (!skipVisible) return
+        val want = shouldAutoSkip(range)
+        if (want == (autoSkipLeft > 0)) return
+        showSkipButton(range)
     }
 
     private fun stopAutoSkip() {
@@ -3959,6 +3986,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             putExtra(Extras.POSITION, if (endedByCompletion) lastDuration else lastPosition)
             putExtra("duration", lastDuration)
             putExtra("end_by", if (endedByCompletion) END_BY_COMPLETION else END_BY_USER)
+            autoSkipOverride?.let { putExtra(Extras.AUTO_SKIP, it) }
         }
         setResult(Activity.RESULT_OK, data)
     }

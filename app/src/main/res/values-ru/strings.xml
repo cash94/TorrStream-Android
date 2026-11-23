@@ -60,6 +60,8 @@
     <string name="player_auto_skip_credits">⏭ Следующая серия через %1$d · ОК — смотреть титры</string>
     <string name="player_seek_step">%1$d сек</string>
     <string name="player_settings">Настройки</string>
+    <string name="player_auto_skip">Автопропуск заставки и титров</string>
+    <string name="player_auto_skip_desc">Через 5 секунд пропускает вступление и включает следующую серию</string>
     <string name="player_clock">Часы</string>
     <string name="player_buffer">Буфер</string>
     <string name="player_on">Вкл</string>

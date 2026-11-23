@@ -60,6 +60,8 @@
     <string name="player_auto_skip_credits">⏭ %1$d 秒后播放下一集 · 按 OK 观看片尾</string>
     <string name="player_seek_step">%1$d 秒</string>
     <string name="player_settings">设置</string>
+    <string name="player_auto_skip">自动跳过片头和片尾</string>
+    <string name="player_auto_skip_desc">倒计时 5 秒后跳过片头并播放下一集</string>
     <string name="player_clock">时钟</string>
     <string name="player_buffer">缓冲</string>
     <string name="player_on">开</string>

@@ -791,6 +791,14 @@ class MainActivity : BaseActivity(),
         val pos = intent.getLongExtra("position", 0L)
         val dur = intent.getLongExtra("duration", 0L)
         val endBy = intent.getStringExtra("end_by")
+        // Автопропуск переключили в шестерёнке плеера — веб хранит его у себя
+        // (localStorage autoSkipIntro) и пришлёт в следующий запуск сам
+        if (intent.hasExtra(InternalPlayerActivity.Extras.AUTO_SKIP)) {
+            val on = intent.getBooleanExtra(InternalPlayerActivity.Extras.AUTO_SKIP, false)
+            browser?.evaluateJavascript(
+                "window.setAutoSkip ? setAutoSkip($on) : localStorage.setItem('autoSkipIntro','$on')"
+            ) { }
+        }
 
         when {
             // Trust the player's own verdict rather than inferring completion from the numbers.

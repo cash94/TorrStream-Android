@@ -62,6 +62,8 @@
     <string name="player_auto_skip_credits">⏭ Next episode in %1$d · OK to watch credits</string>
     <string name="player_seek_step">%1$d s</string>
     <string name="player_settings">Settings</string>
+    <string name="player_auto_skip">Auto-skip intro and credits</string>
+    <string name="player_auto_skip_desc">Skip the intro and go to the next episode after a 5-second countdown</string>
     <string name="player_clock">Clock</string>
     <string name="player_buffer">Buffer</string>
     <string name="player_on">On</string>
