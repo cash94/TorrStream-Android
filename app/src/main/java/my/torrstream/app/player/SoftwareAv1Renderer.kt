@@ -1,5 +1,6 @@
 package my.torrstream.app.player
 
+import android.os.Build
 import android.os.Handler
 import androidx.annotation.OptIn
 import androidx.media3.common.C
@@ -15,8 +16,15 @@ import androidx.media3.exoplayer.video.VideoRendererEventListener
  * без аппаратного декодера). Media3 отдал бы ему любой AV1, а мы — только:
  *  - до [maxWidth]×[maxHeight]: 4K на процессоре ТВ — слайд-шоу, такую дорожку пусть разбирает
  *    hardwareOnlyFormat в плеере («устройство не тянет»);
- *  - 8 бит: JNI dav1d из Media3 1.11.1 10-битный кадр не выводит (kJniStatusHighBitDepth…),
- *    а 10 бит у AV1-релизов частый случай. Глубина известна из av1C (MKV, MP4); если нет — пробуем.
+ *  - 10 бит — с Android 10: JNI собран из main androidx/media (tools/av1-decoder/build.sh) и
+ *    выводит 10-битный кадр как P010 в Surface, а окно P010 (AHARDWAREBUFFER_FORMAT_YCbCr_P010)
+ *    есть только с API 29. Раньше — 8 бит, 10-битную дорожку пусть берёт другой путь.
+ *    Глубина известна из av1C (MKV, MP4); если нет — пробуем.
+ *
+ * Конвейер шире стокового (из Just+ Player): у 4K/1080p-релиза AV1 обычно одна плитка, и dav1d
+ * распараллеливает между кадрами, а не внутри кадра — maxFrameDelay 2 по умолчанию его душит.
+ * 4 кадра в работе (замер Just+: 49 → 92 кадр/с на 8 потоках), буферов больше, чтобы конвейер
+ * не простаивал. Потоков — сколько dav1d решит сам.
  */
 @OptIn(UnstableApi::class)
 class SoftwareAv1Renderer(
@@ -27,14 +35,21 @@ class SoftwareAv1Renderer(
     private val maxWidth: Int,
     private val maxHeight: Int,
 ) : ForwardingRenderer(
-    Libdav1dVideoRenderer(allowedJoiningTimeMs, eventHandler, eventListener, maxDroppedFramesToNotify),
+    Libdav1dVideoRenderer(
+        allowedJoiningTimeMs, eventHandler, eventListener, maxDroppedFramesToNotify,
+        Libdav1dVideoRenderer.THREAD_COUNT_DECODER_DEFAULT,
+        /* maxFrameDelay = */ 4, /* numInputBuffers = */ 8, /* numOutputBuffers = */ 6,
+        /* useCustomAllocator = */ false,
+    ),
 ) {
+    private val maxBitDepth = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) 10 else 8
+
     override fun getCapabilities(): RendererCapabilities {
         val base = super.getCapabilities()
         return object : RendererCapabilities by base {
             override fun supportsFormat(format: Format): Int {
                 val bitDepth = format.colorInfo?.lumaBitdepth ?: Format.NO_VALUE
-                if (format.width > maxWidth || format.height > maxHeight || bitDepth > 8) {
+                if (format.width > maxWidth || format.height > maxHeight || bitDepth > maxBitDepth) {
                     return RendererCapabilities.create(C.FORMAT_UNSUPPORTED_SUBTYPE)
                 }
                 return base.supportsFormat(format)

@@ -156,10 +156,11 @@ class AssSubtitles(context: Context) {
 
         private fun withAss(extractors: Array<Extractor>): Array<Extractor> {
             // Повреждённое место в MKV — пропустить до следующего кластера (MatroskaResyncExtractor)
-            val mkv = MatroskaResyncExtractor(
-                if (item == currentItem) AssMatroskaExtractor(parsers, handler)
-                else MatroskaExtractor(preloadParsers)
-            )
+            // Слой улучшения Dolby Vision 7 — конвертеру (Dv7Converter)
+            val matroska = if (item == currentItem) Dv7Converter.AssMatroska(parsers, handler)
+            else Dv7Converter.Matroska(preloadParsers)
+            // Индекс за цепочкой SeekHead — найти до начала разбора (MkvCuesLink)
+            val mkv = MkvCuesLink(MatroskaResyncExtractor(matroska), matroska)
             extractors.forEachIndexed { i, extractor ->
                 if (extractor is MatroskaExtractor) extractors[i] = mkv
                 // AVI: кадры AC-3/MP3, разрезанные чанками, битый hdrl, fourcc вроде X264
@@ -168,9 +169,11 @@ class AssSubtitles(context: Context) {
                 )
             }
             // Переход, потерянный при сбое открытия потока, — повторить (SeekGuardExtractor);
-            // Dolby Vision profile 7 без декодера DV — как HEVC (DolbyVisionBaseLayer)
+            // Dolby Vision profile 7 — как 8.1, где декодер profile 8 есть (Dv7Converter), а нет —
+            // как HEVC (DolbyVisionBaseLayer, снаружи: видит формат уже после конвертера);
+            // profile 10 без декодера DV — как AV1 (Dv10AsAv1)
             return Array(extractors.size) {
-                SeekGuardExtractor(DolbyVisionBaseLayerExtractor(extractors[it]))
+                SeekGuardExtractor(DolbyVisionBaseLayerExtractor(Dv7Converter.wrap(extractors[it])))
             }
         }
     }

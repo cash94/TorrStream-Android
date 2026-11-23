@@ -103,8 +103,8 @@ object AudioOutput {
     }
 
     /**
-     * Звуковой выход ExoPlayer под режим; null — оставить выход по умолчанию (режим «Авто»:
-     * он сам следит за HDMI и перестраивается, когда ресивер подключат или отключат).
+     * Звуковой выход ExoPlayer под режим. «Авто» — с Context, как выход по умолчанию: он сам
+     * следит за HDMI и перестраивается, когда ресивер подключат или отключат.
      *
      * Для PCM и принудительного битстрима выход собирается без Context: иначе DefaultAudioSink
      * берёт возможности у системы и подписывается на их изменения, перекрывая заданные.
@@ -117,20 +117,27 @@ object AudioOutput {
         enableFloatOutput: Boolean,
         enableAudioTrackPlaybackParams: Boolean,
     ): AudioSink? {
-        val capabilities = when {
+        val builder = when {
             // Ничего, кроме PCM: AC3/DTS декодирует MediaCodec устройства или FFmpeg.
-            limit != Limit.NONE || mode == Prefs.AUDIO_PCM -> AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES
-            mode == Prefs.AUDIO_PASSTHROUGH -> forcedCapabilities(context)
-            else -> return null
+            limit != Limit.NONE || mode == Prefs.AUDIO_PCM ->
+                DefaultAudioSink.Builder().setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
+            mode == Prefs.AUDIO_PASSTHROUGH ->
+                DefaultAudioSink.Builder().setAudioCapabilities(forcedCapabilities(context))
+            // «Авто»: возможности выхода — от системы, как у DefaultRenderersFactory (с Context)
+            else -> DefaultAudioSink.Builder(context)
+        }.setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+        // Ночной режим (NightModeProcessor) в цепочке всегда — уровень меняется на ходу; на
+        // битстриме и float он не включается. Float на выход у нас и так не включается
+        // (DefaultRenderersFactory по умолчанию), иначе процессоры бы пропускались
+        if (limit == Limit.NONE) {
+            return builder.setEnableFloatOutput(enableFloatOutput)
+                .setAudioProcessors(arrayOf(NightModeProcessor()))
+                .build()
         }
-        val builder = DefaultAudioSink.Builder()
-            .setAudioCapabilities(capabilities)
-            .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-        if (limit == Limit.NONE) return builder.setEnableFloatOutput(enableFloatOutput).build()
 
         // Сведение работает с 16-битным PCM — float на выход не пускаем, и до процессоров
         // DefaultAudioSink сам переводит 24/32 бита и float в 16
-        val processors = mutableListOf<AudioProcessor>(stereoDownmix())
+        val processors = mutableListOf<AudioProcessor>(stereoDownmix(), NightModeProcessor())
         if (limit == Limit.SAFE) {
             processors += SonicAudioProcessor().apply { setOutputSampleRateHz(SAFE_SAMPLE_RATE) }
         }

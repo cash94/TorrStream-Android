@@ -5,7 +5,7 @@
 # Как и FFmpeg-расширение (../ffmpeg-decoder/build.sh), в Maven его нет: dav1d
 # собирается под 4 ABI, модуль decoder_av1 берётся из исходников Media3 той же
 # версии, что и в app/build.gradle. Нужен там, где у устройства нет AV1 вовсе
-# (Android до 10 без аппаратного) — программно до 1080p.
+# (Android до 10 без аппаратного) — программно до 1080p, 8 и 10 бит.
 #
 # Нужны: Android SDK с NDK r26b и CMake 3.22.1, JDK 17, git, meson и ninja
 # (pip install meson ninja), nasm 2.14+ (ассемблер dav1d для x86). Работает на
@@ -15,6 +15,13 @@
 set -euo pipefail
 
 MEDIA3_VERSION=1.11.1
+# JNI (dav1d_jni.cc и соседи) — из main androidx/media: в 1.11.1 JNI отказывает каждому
+# кадру глубже 8 бит (kJniStatusHighBitDepthNotSupportedWithYuv), а в main есть вывод 10 бит —
+# P010 прямо в Surface, с dataspace по передаточной функции. В релиз ещё не вошло. Java-часть
+# остаётся из 1.11.1: main регистрирует те же 11 нативных методов с теми же сигнатурами, и
+# все поля/методы, которые JNI ищет, в media3-decoder 1.11.1 есть (так же у Just+ Player).
+# Убрать, когда 10 бит выйдет в релизе Media3.
+MEDIA3_JNI_COMMIT=24828101670d958a045d833e99997862ebfc5e9a
 DAV1D_TAG=1.5.1
 CPU_FEATURES_TAG=v0.10.1
 NDK_VERSION=26.1.10909125
@@ -56,6 +63,12 @@ echo "== Media3 $MEDIA3_VERSION: исходники decoder_av1"
 "${GIT[@]}" clone -q --depth 1 --branch "$MEDIA3_VERSION" --filter=blob:none --sparse \
   https://github.com/androidx/media.git "$SRC"
 "${GIT[@]}" -C "$SRC" sparse-checkout set libraries/decoder_av1
+
+echo "== JNI decoder_av1 из main ($MEDIA3_JNI_COMMIT)"
+for f in dav1d_jni.cc cpu_info.cc cpu_info.h CMakeLists.txt; do
+  curl -fsSL "https://raw.githubusercontent.com/androidx/media/$MEDIA3_JNI_COMMIT/libraries/decoder_av1/src/main/jni/$f"     -o "$MODULE/jni/$f"
+done
+grep -q kP010Shift "$MODULE/jni/dav1d_jni.cc" || { echo "В dav1d_jni.cc нет вывода 10 бит"; exit 1; }
 
 echo "== dav1d $DAV1D_TAG, cpu_features $CPU_FEATURES_TAG"
 "${GIT[@]}" clone -q --depth 1 --branch "$DAV1D_TAG" https://code.videolan.org/videolan/dav1d.git "$MODULE/jni/dav1d"

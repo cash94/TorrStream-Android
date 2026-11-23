@@ -78,7 +78,7 @@
     <string name="player_unit_sec">%1$d s</string>
     <string name="player_unit_min">%1$d min</string>
     <string name="player_unit_hour">%1$d h</string>
-    <string name="player_clock_desc">Current time over the video</string>
+    <string name="player_clock_desc">Always over the video; off — shown only with the controls</string>
     <string name="player_buffer_desc">How much is loaded ahead. More survives a shaky connection</string>
     <string name="player_decoder_desc">What decodes the video and audio</string>
     <string name="player_decoder_combined_desc">Hardware, switching to software when a format is unsupported</string>
@@ -239,6 +239,15 @@
     <string name="global_search_series">Series</string>
     <string name="global_search_hint">Movies and series</string>
     <string name="global_search_settings">Movies and series from TMDB in TorrStream</string>
+    <string name="player_night_mode">Night mode</string>
+    <string name="player_night_mode_desc">Evens out loud and quiet so speech is heard without the explosions waking everyone</string>
+    <string name="player_night_mode_off">Off</string>
+    <string name="player_night_mode_off_desc">Sound as it is</string>
+    <string name="player_night_mode_gentle">Gentle</string>
+    <string name="player_night_mode_gentle_desc">Tames only the loudest scenes — for a receiver with real speakers</string>
+    <string name="player_night_mode_strong">Strong</string>
+    <string name="player_night_mode_strong_desc">Even volume throughout — for TV speakers at night</string>
+    <string name="player_night_mode_passthrough">Not with pass-through: a bitstream is compressed by the receiver</string>
     <string name="player_audio_decoder">Audio decoder</string>
     <string name="player_audio_decoder_desc">What decodes the audio, whatever the decoder setting does with video</string>
     <string name="player_audio_decoder_auto">Device</string>

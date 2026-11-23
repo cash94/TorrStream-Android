@@ -55,6 +55,7 @@ class PlaybackInfo : AnalyticsListener {
 
     /** Плеер пересобран (откат, смена настроек): декодеры и выход будут выбраны заново. */
     fun onPlayerBuilt(reason: String) {
+        Dv7Converter.resetStatus()
         videoDecoder = null
         videoFormat = null
         firstFrameAtMs = -1L
@@ -198,13 +199,15 @@ class PlaybackInfo : AnalyticsListener {
     // region вывод
 
     /** Звук ушёл на выход как есть (AC3/DTS ресиверу), без декодера на устройстве. */
-    private val passthrough: Boolean
+    val passthrough: Boolean
         get() = audioTrack?.let { !isPcm(it.encoding) } == true
 
     /** Для отчёта: всё собранное, плюс громкость системы. */
     fun toJson(context: Context) = JSONObject().apply {
         videoFormat?.let { put("videoFormat", formatShort(it)) }
         videoDecoder?.let { put("videoDecoder", it) }
+        // Dolby Vision profile 7: сконвертирован ли в 8.1 и если нет — почему
+        Dv7Converter.status()?.let { put("dolbyVision7", it) }
         put("droppedFrames", droppedFrames)
         put("firstFrame", firstFrameAtMs >= 0)
         audioFormat?.let { put("audioFormat", formatShort(it)) }

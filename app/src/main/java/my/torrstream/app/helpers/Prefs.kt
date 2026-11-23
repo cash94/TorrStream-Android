@@ -32,6 +32,7 @@ object Prefs {
     private const val PLAYER_ENGINE_KEY = "player_engine"
     private const val PLAYER_AUDIO_KEY = "player_audio"
     private const val PLAYER_AUDIO_DECODER_KEY = "player_audio_decoder"
+    private const val PLAYER_NIGHT_MODE_KEY = "player_night_mode"
     private const val PLAYER_SUBTITLE_SIZE_KEY = "player_subtitle_size"
     private const val BACK_HOLD_EXIT_KEY = "back_hold_exit"
 
@@ -153,6 +154,11 @@ object Prefs {
     var Context.playerAudioDecoder: Int
         get() = appPrefs.getInt(PLAYER_AUDIO_DECODER_KEY, AUDIO_DECODER_AUTO)
         set(value) = appPrefs.edit { putInt(PLAYER_AUDIO_DECODER_KEY, value) }
+
+    /** Встроенный плеер: ночной режим звука — NightMode.OFF / GENTLE / STRONG. */
+    var Context.playerNightMode: Int
+        get() = appPrefs.getInt(PLAYER_NIGHT_MODE_KEY, 0).coerceIn(0, 2)
+        set(value) = appPrefs.edit { putInt(PLAYER_NIGHT_MODE_KEY, value) }
 
     /** Встроенный плеер: уровень размера субтитров — индекс в PLAYER_SUBTITLE_SCALES. */
     var Context.playerSubtitleSize: Int

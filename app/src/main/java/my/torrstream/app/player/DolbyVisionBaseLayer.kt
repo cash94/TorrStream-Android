@@ -1,5 +1,6 @@
 package my.torrstream.app.player
 
+import android.media.MediaCodecInfo
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.DataReader
@@ -35,6 +36,14 @@ import java.util.concurrent.ConcurrentHashMap
  * [forceBaseLayer] — декодер DV есть, но не справился посреди фильма (TCL, Realtek
  * OMX.realtek.video.dvhe.st.decoder на profile 8.1, 2 отчёта 1.1.38): тогда profile 7 и 8
  * идут как HEVC независимо от декодеров — базовый слой у обоих HDR10 (8.4 — HLG).
+ *
+ * Profile 10 (dav1.10) — это обычный AV1 с RPU в metadata OBU, которую декодер AV1 пропускает.
+ * Без декодера DV Media3 сама откроет декодер AV1 (getAlternativeDecoderInfos), но в
+ * MediaCodecVideoRenderer.getMediaFormat запишет ему KEY_PROFILE = DolbyVisionProfileDvav110 —
+ * проверка там по mime формата, а не декодера. Часть декодеров AV1 на configure() с таким
+ * профилем падает (Mi Note 10, Android 11 — отчёт Just+ Player), а программный dav1d формат
+ * video/dolby-vision не берёт вовсе. Поэтому без декодера profile 10 дорожка объявляется AV1
+ * (codecs — null: профиль/глубину AV1 строка DV не несёт). Картинка — HDR10 базового слоя.
  */
 @OptIn(UnstableApi::class)
 object DolbyVisionBaseLayer {
@@ -59,6 +68,11 @@ object DolbyVisionBaseLayer {
     /** Формат как есть или он же как HEVC, если DV profile 7 на устройстве не декодируется. */
     fun adapt(format: Format): Format {
         if (format.sampleMimeType != MimeTypes.VIDEO_DOLBY_VISION) return format
+        if (format.codecs?.startsWith("dav1.") == true) {
+            if (profile10Listed) return format
+            Log.i(TAG, "${format.codecs}: no Dolby Vision profile 10 decoder, offered as AV1")
+            return format.buildUpon().setSampleMimeType(MimeTypes.VIDEO_AV1).setCodecs(null).build()
+        }
         val forced = forceBaseLayer && hasHevcBaseLayer(format)
         if (!forced) {
             if (profileOf(format.codecs) != PROFILE_DUAL_LAYER_BD) return format
@@ -71,6 +85,17 @@ object DolbyVisionBaseLayer {
             // Профиль и уровень в строке — от DV, декодеру HEVC они ничего не скажут
             .setCodecs(null)
             .build()
+    }
+
+    /** Есть ли декодер, заявляющий Dolby Vision profile 10 (AV1). Декодеры за жизнь процесса не меняются. */
+    private val profile10Listed: Boolean by lazy {
+        try {
+            MediaCodecUtil.getDecoderInfos(MimeTypes.VIDEO_DOLBY_VISION, false, false).any { info ->
+                info.profileLevels.any { it.profile == MediaCodecInfo.CodecProfileLevel.DolbyVisionProfileDvav110 }
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     /** «dvhe.07.06» / «dvh1.07.06» → 7. */

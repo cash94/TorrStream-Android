@@ -76,7 +76,7 @@
     <string name="player_unit_sec">%1$d 秒</string>
     <string name="player_unit_min">%1$d 分</string>
     <string name="player_unit_hour">%1$d 小时</string>
-    <string name="player_clock_desc">在视频上方显示当前时间</string>
+    <string name="player_clock_desc">始终显示在视频上；关闭时仅随控制面板显示</string>
     <string name="player_buffer_desc">预加载多少内容。越多越能抵抗网络中断</string>
     <string name="player_decoder_desc">用什么解码视频和音频</string>
     <string name="player_decoder_combined_desc">硬件解码，格式不支持时切换到软件解码</string>
@@ -231,6 +231,15 @@
     <string name="global_search_series">剧集</string>
     <string name="global_search_hint">电影和剧集</string>
     <string name="global_search_settings">TorrStream 中来自 TMDB 的电影和剧集</string>
+    <string name="player_night_mode">夜间模式</string>
+    <string name="player_night_mode_desc">压低响声、提升轻声 — 对白清晰，爆炸声不吵醒家人</string>
+    <string name="player_night_mode_off">关</string>
+    <string name="player_night_mode_off_desc">原始声音</string>
+    <string name="player_night_mode_gentle">轻度</string>
+    <string name="player_night_mode_gentle_desc">只压低最响的场景 — 适合接功放和音箱</string>
+    <string name="player_night_mode_strong">强</string>
+    <string name="player_night_mode_strong_desc">音量平稳 — 适合夜间用电视扬声器</string>
+    <string name="player_night_mode_passthrough">直通输出时无效：码流由功放处理</string>
     <string name="player_audio_decoder">音频解码器</string>
     <string name="player_audio_decoder_desc">用什么解码音频（与视频分开）</string>
     <string name="player_audio_decoder_auto">设备</string>

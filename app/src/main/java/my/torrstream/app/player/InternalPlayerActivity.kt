@@ -50,6 +50,7 @@ import java.net.HttpURLConnection
 import my.torrstream.app.helpers.RemoteKeys
 import my.torrstream.app.helpers.ServerCookies
 import my.torrstream.app.helpers.coverDisplayCutout
+import my.torrstream.app.helpers.isTvBox
 import my.torrstream.app.helpers.hideSystemUI
 import java.net.URL
 import androidx.media3.common.C
@@ -110,6 +111,7 @@ import my.torrstream.app.helpers.Prefs.playerBufferMb
 import my.torrstream.app.helpers.Prefs.playerDecoderMode
 import my.torrstream.app.helpers.Prefs.playerEngine
 import my.torrstream.app.helpers.Prefs.playerShowClock
+import my.torrstream.app.helpers.Prefs.playerNightMode
 import my.torrstream.app.helpers.Prefs.playerSubtitleSize
 import java.util.Date
 import java.util.Locale
@@ -479,6 +481,12 @@ class InternalPlayerActivity : AppCompatActivity() {
 
     /** Отрисовка ASS через libass — только у ExoPlayer, у libVLC она своя. */
     private var assSubtitles: AssSubtitles? = null
+
+    /** Битстрим после паузы — пересоздать выход, чтобы ресивер захватился снова. */
+    private var passthroughRestart: PassthroughRestart? = null
+
+    /** Картинка встала, а звук идёт — сбросить рендерер. */
+    private var freezeWatchdog: VideoFreezeWatchdog? = null
 
     // «Онлайн субтитры» (OnlineSubtitles): реплики рисует свой SubtitleView поверх кадра по
     // позиции плеера — одинаково для ExoPlayer и libVLC, и встроенные дорожки ему не мешают
@@ -850,6 +858,8 @@ class InternalPlayerActivity : AppCompatActivity() {
         val audioMode = audioMode
         val audioLimit = audioLimit
         val videoMode = if (softwareVideoFallback) Prefs.DECODER_SOFTWARE else playerDecoderMode
+        val tvBox = isTvBox
+        NightMode.level = playerNightMode
         val factory = object : DefaultRenderersFactory(this) {
             // Режим «Вывод звука»: PCM или битстрим решает выход, а не рендерер — рендерер
             // сам переходит на декодер, когда выход формат как есть не берёт.
@@ -887,7 +897,7 @@ class InternalPlayerActivity : AppCompatActivity() {
                         Runtime.getRuntime().availableProcessors(),
                         SOFTWARE_VIDEO_MAX_WIDTH, SOFTWARE_VIDEO_MAX_HEIGHT,
                     ),
-                    // AV1 — dav1d (tools/av1-decoder), до 1080p и 8 бит
+                    // AV1 — dav1d (tools/av1-decoder), до 1080p; 10 бит — с Android 10
                     SoftwareAv1Renderer(
                         allowedVideoJoiningTimeMs, eventHandler, eventListener, dropped,
                         SOFTWARE_VIDEO_MAX_WIDTH, SOFTWARE_VIDEO_MAX_HEIGHT,
@@ -901,7 +911,11 @@ class InternalPlayerActivity : AppCompatActivity() {
             }
 
             // Тот же рендерер MediaCodec, но AAC Main/SSR/LTP, которых декодер устройства не
-            // заявляет, он отдаёт FFmpeg (AacProfileAudioRenderer)
+            // заявляет, он отдаёт FFmpeg (AacProfileAudioRenderer), а AC3/E-AC3/DTS — мимо
+            // ненадёжных декодеров Dolby/DTS устройства (MutedAudioDecoders). На ТВ FFmpeg в
+            // списке всегда, и в «Аппаратном» режиме, — позади платформенного (ON), так что
+            // битстрим и декодер устройства для прочего по-прежнему первые. Вне ТВ в «Аппаратном»
+            // FFmpeg нет — там и декодеры не убираем, взять дорожку было бы некому
             override fun buildAudioRenderers(
                 context: Context,
                 extensionRendererMode: Int,
@@ -912,14 +926,18 @@ class InternalPlayerActivity : AppCompatActivity() {
                 eventListener: AudioRendererEventListener,
                 out: ArrayList<Renderer>,
             ) {
+                val mode = if (tvBox && extensionRendererMode == EXTENSION_RENDERER_MODE_OFF)
+                    EXTENSION_RENDERER_MODE_ON else extensionRendererMode
                 super.buildAudioRenderers(
-                    context, extensionRendererMode, mediaCodecSelector, enableDecoderFallback,
+                    context, mode, mediaCodecSelector, enableDecoderFallback,
                     audioSink, eventHandler, eventListener, out,
                 )
                 val index = out.indexOfFirst { it.javaClass == MediaCodecAudioRenderer::class.java }
                 if (index >= 0) {
+                    val selector = if (mode == EXTENSION_RENDERER_MODE_OFF) mediaCodecSelector
+                    else MutedAudioDecoders.skipping(mediaCodecSelector, tvBox)
                     out[index] = AacProfileAudioRenderer(
-                        context, codecAdapterFactory, mediaCodecSelector, enableDecoderFallback,
+                        context, codecAdapterFactory, selector, enableDecoderFallback,
                         eventHandler, eventListener, audioSink,
                     )
                 }
@@ -1036,6 +1054,11 @@ class InternalPlayerActivity : AppCompatActivity() {
                         getString(audioDecoderLabelRes(playerAudioDecoder)),
                 R.string.player_audio_decoder_desc,
             ),
+            withDescription(
+                "${getString(R.string.player_night_mode)}: " +
+                        getString(nightModeLabelRes(playerNightMode)),
+                R.string.player_night_mode_desc,
+            ),
             withDescription(getString(R.string.player_diagnostics), R.string.player_diagnostics_desc),
         )
         val actions = listOf<() -> Unit>(
@@ -1056,6 +1079,7 @@ class InternalPlayerActivity : AppCompatActivity() {
             { showEnginePanel() },
             { showAudioPanel() },
             { showAudioDecoderPanel() },
+            { showNightModePanel() },
             { showDiagnosticsPanel() },
         )
         showSidePanel(
@@ -1221,6 +1245,44 @@ class InternalPlayerActivity : AppCompatActivity() {
         )
     }
 
+    private fun nightModeLabelRes(level: Int) = when (level) {
+        NightMode.GENTLE -> R.string.player_night_mode_gentle
+        NightMode.STRONG -> R.string.player_night_mode_strong
+        else -> R.string.player_night_mode_off
+    }
+
+    private fun showNightModePanel() {
+        val levels = listOf(NightMode.OFF, NightMode.GENTLE, NightMode.STRONG)
+        showSidePanel(
+            titleRes = R.string.player_night_mode,
+            labels = levels.map {
+                withDescription(
+                    getString(nightModeLabelRes(it)),
+                    when (it) {
+                        NightMode.GENTLE -> R.string.player_night_mode_gentle_desc
+                        NightMode.STRONG -> R.string.player_night_mode_strong_desc
+                        else -> R.string.player_night_mode_off_desc
+                    },
+                )
+            },
+            checkedIndex = levels.indexOf(playerNightMode),
+            actions = levels.map { level -> { applyNightMode(level) } },
+            opener = btnSettings,
+            itemLayout = R.layout.item_side_panel_desc,
+            back = { showSettingsPanel() },
+        )
+    }
+
+    /** Процессор читает уровень на каждом буфере — плеер не пересобираем. */
+    private fun applyNightMode(level: Int) {
+        playerNightMode = level
+        NightMode.level = level
+        if (level != NightMode.OFF && playbackInfo.passthrough && !usingVlc) {
+            App.toast(R.string.player_night_mode_passthrough, true)
+        }
+        showSettingsPanel()
+    }
+
     private fun audioDecoderLabelRes(mode: Int) = when (mode) {
         Prefs.AUDIO_DECODER_FFMPEG -> R.string.player_audio_decoder_ffmpeg
         else -> R.string.player_audio_decoder_auto
@@ -1375,12 +1437,42 @@ class InternalPlayerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Часы: включены — видны всегда (с ХУДом ярче). Выключены — появляются вместе с ХУДом и
+     * гаснут с ним: время на экране управления нужно и тем, кто не хочет его поверх фильма.
+     */
     private fun applyClockVisibility() {
-        clockView.visibility = if (playerShowClock) View.VISIBLE else View.GONE
+        clockView.animate().cancel()
+        if (playerShowClock || hudShown) {
+            clockView.alpha = if (hudShown) CLOCK_ALPHA_HUD else CLOCK_ALPHA_IDLE
+            clockView.visibility = View.VISIBLE
+            updateClock()
+        } else {
+            clockView.visibility = View.GONE
+        }
+    }
+
+    private fun fadeClock(hudVisible: Boolean) {
+        clockView.animate().cancel()
+        if (playerShowClock) {
+            clockView.animate().alpha(if (hudVisible) CLOCK_ALPHA_HUD else CLOCK_ALPHA_IDLE)
+                .setDuration(HUD_FADE_MS).start()
+        } else if (hudVisible) {
+            if (clockView.visibility != View.VISIBLE) {
+                clockView.alpha = 0f
+                clockView.visibility = View.VISIBLE
+            }
+            updateClock()
+            clockView.animate().alpha(CLOCK_ALPHA_HUD).setDuration(HUD_FADE_MS).start()
+        } else {
+            clockView.animate().alpha(0f).setDuration(HUD_FADE_MS)
+                .withEndAction { if (!hudShown && !playerShowClock) clockView.visibility = View.GONE }
+                .start()
+        }
     }
 
     private fun updateClock() {
-        if (!playerShowClock) return
+        if (clockView.visibility != View.VISIBLE) return
         clockView.text = android.text.format.DateFormat.getTimeFormat(this).format(Date())
     }
 
@@ -1695,8 +1787,7 @@ class InternalPlayerActivity : AppCompatActivity() {
         fadeHud(headerView, visible)
         fadeHud(playerHint, visible)
         raiseSubtitles(visible)
-        clockView.animate().alpha(if (visible) CLOCK_ALPHA_HUD else CLOCK_ALPHA_IDLE)
-            .setDuration(HUD_FADE_MS).start()
+        fadeClock(visible)
         // Статистику TorrServer опрашиваем, только пока её видно
         if (visible) startTorrStats() else stopTorrStats()
         // The read-out belongs to the seek bar; without the bar there is nothing to read.
@@ -3380,7 +3471,9 @@ class InternalPlayerActivity : AppCompatActivity() {
         )
             .setTrackSelector(DefaultTrackSelector(this))
             .setMediaSourceFactory(
-                ass.mediaSourceFactory(DefaultDataSource.Factory(this, httpFactory))
+                // Сбой открытия — из первого чтения, чтобы повтор шёл с нужного места
+                // (DeferredOpenDataSource)
+                ass.mediaSourceFactory(DeferredOpenDataSource.Factory(DefaultDataSource.Factory(this, httpFactory)))
             )
             // How much of the stream is held in memory. LoadControl is fixed at build time, so
             // changing this setting rebuilds the player (see applyBufferSize).
@@ -3401,6 +3494,11 @@ class InternalPlayerActivity : AppCompatActivity() {
                 exo.addAnalyticsListener(playbackInfo)
                 ass.attach(exo) { handler.post { restartPlayer("ASS in the preloaded item") } }
                 assSubtitles = ass
+                passthroughRestart = PassthroughRestart(exo, handler) { playbackInfo.passthrough }
+                    .also { it.attach() }
+                freezeWatchdog = VideoFreezeWatchdog(exo, handler) { cure ->
+                    playbackInfo.event("video frozen, audio on: $cure")
+                }.also { it.attach() }
             }
     }
 
@@ -4002,7 +4100,9 @@ class InternalPlayerActivity : AppCompatActivity() {
         val p = player ?: return
         resumeIndex = p.currentMediaItemIndex
         resumePositionMs = p.currentPosition.coerceAtLeast(0L)
-        resumeTrackParams = p.trackSelectionParameters
+        // Звук выключается только на миг перезапуска битстрима (PassthroughRestart) — в снимок не берём
+        resumeTrackParams = p.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false).build()
     }
 
     private fun releasePlayer() {
@@ -4010,6 +4110,10 @@ class InternalPlayerActivity : AppCompatActivity() {
         handler.removeCallbacks(onlineTick)
         timecodeJob?.cancel()
         timecodeJob = null
+        passthroughRestart?.release()
+        passthroughRestart = null
+        freezeWatchdog?.release()
+        freezeWatchdog = null
         player?.let {
             it.removeListener(playerListener)
             it.release()

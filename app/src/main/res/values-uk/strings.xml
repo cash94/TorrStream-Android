@@ -76,7 +76,7 @@
     <string name="player_unit_sec">%1$d сек</string>
     <string name="player_unit_min">%1$d хв</string>
     <string name="player_unit_hour">%1$d год</string>
-    <string name="player_clock_desc">Поточний час поверх відео</string>
+    <string name="player_clock_desc">Завжди поверх відео; вимкнено — лише разом із панеллю керування</string>
     <string name="player_buffer_desc">Скільки завантажувати наперед. Більше — стійкіше до обривів звʼязку</string>
     <string name="player_decoder_desc">Чим декодувати відео та звук</string>
     <string name="player_decoder_combined_desc">Апаратний, з переходом на програмний, якщо формат не підтримується</string>
@@ -234,6 +234,15 @@
     <string name="global_search_series">Серіал</string>
     <string name="global_search_hint">Фільми та серіали</string>
     <string name="global_search_settings">Фільми та серіали з TMDB у TorrStream</string>
+    <string name="player_night_mode">Нічний режим</string>
+    <string name="player_night_mode_desc">Гучне тихіше, тихе чутніше — мова розбірлива, а вибухи не будять дім</string>
+    <string name="player_night_mode_off">Вимк</string>
+    <string name="player_night_mode_off_desc">Звук як є</string>
+    <string name="player_night_mode_gentle">М’який</string>
+    <string name="player_night_mode_gentle_desc">Приглушує лише найгучніші сцени — для ресивера з добрими колонками</string>
+    <string name="player_night_mode_strong">Сильний</string>
+    <string name="player_night_mode_strong_desc">Рівна гучність — для динаміків ТБ уночі</string>
+    <string name="player_night_mode_passthrough">З прямим виведенням не діє: бітстрим стискає ресивер</string>
     <string name="player_audio_decoder">Декодер звуку</string>
     <string name="player_audio_decoder_desc">Чим декодувати звук — окремо від відео</string>
     <string name="player_audio_decoder_auto">Пристрою</string>
