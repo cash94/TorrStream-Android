@@ -430,7 +430,8 @@ class MainActivity : BaseActivity(),
         return super.dispatchKeyEvent(RemoteKeys.toBack(this, event) ?: event)
     }
 
-    // Удержание «Назад» — меню приложения или, если так выбрано в «Об устройстве», выход
+    // Удержание «Назад» — меню приложения или, если так выбрано в «Прочем», выход.
+    // При выходе двойным нажатием (его ловит страница) удержание — тоже меню
     override fun onKeyLongPress(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             logDebug("Back button long pressed, exit=$backHoldExit")

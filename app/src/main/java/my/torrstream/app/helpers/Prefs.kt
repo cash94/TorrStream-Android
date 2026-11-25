@@ -35,6 +35,7 @@ object Prefs {
     private const val PLAYER_NIGHT_MODE_KEY = "player_night_mode"
     private const val PLAYER_SUBTITLE_SIZE_KEY = "player_subtitle_size"
     private const val BACK_HOLD_EXIT_KEY = "back_hold_exit"
+    private const val BACK_DOUBLE_EXIT_KEY = "back_double_exit"
 
     /** Hardware first, software picked up whenever hardware cannot handle the track. */
     const val DECODER_COMBINED = 0
@@ -130,6 +131,30 @@ object Prefs {
     var Context.backHoldExit: Boolean
         get() = appPrefs.getBoolean(BACK_HOLD_EXIT_KEY, false)
         set(value) = appPrefs.edit { putBoolean(BACK_HOLD_EXIT_KEY, value) }
+
+    /**
+     * Двойное «Назад» на главной веб-интерфейса — выход. Ловит его страница (config.js:
+     * rootBackPress): только она знает, что «Назад» вести уже некуда, и выходит через
+     * AndroidJS.appExit. С удержанием взаимоисключающе — см. [backExitMode].
+     */
+    var Context.backDoubleExit: Boolean
+        get() = appPrefs.getBoolean(BACK_DOUBLE_EXIT_KEY, false)
+        set(value) = appPrefs.edit { putBoolean(BACK_DOUBLE_EXIT_KEY, value) }
+
+    /**
+     * Выход по «Назад» одним выбором из трёх («Прочее» веб-интерфейса): "off", "hold"
+     * (удержание) или "double" (двойное нажатие). Включаешь одно — другое выключается.
+     */
+    var Context.backExitMode: String
+        get() = when {
+            backHoldExit -> "hold"
+            backDoubleExit -> "double"
+            else -> "off"
+        }
+        set(mode) = appPrefs.edit {
+            putBoolean(BACK_HOLD_EXIT_KEY, mode == "hold")
+            putBoolean(BACK_DOUBLE_EXIT_KEY, mode == "double")
+        }
 
     var Context.playerShowClock: Boolean
         get() = appPrefs.getBoolean(PLAYER_CLOCK_KEY, true)

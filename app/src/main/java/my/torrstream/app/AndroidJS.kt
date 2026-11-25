@@ -17,6 +17,7 @@ import my.torrstream.app.browser.Browser
 import my.torrstream.app.browser.ImageCache
 import my.torrstream.app.helpers.Helpers.debugLog
 import my.torrstream.app.helpers.Prefs.appLang
+import my.torrstream.app.helpers.Prefs.backExitMode
 import my.torrstream.app.helpers.Prefs.backHoldExit
 import my.torrstream.app.helpers.Prefs.storagePrefs
 import my.torrstream.app.torrserver.TorrServerDiscovery
@@ -248,7 +249,28 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
 
     @JavascriptInterface
     fun setBackHoldExit(enabled: Boolean) {
-        mainActivity.backHoldExit = enabled
+        // Старый веб (только удержание): включённое удержание выключает двойное нажатие
+        mainActivity.backExitMode = if (enabled) "hold" else "off"
+    }
+
+    // «Прочее» (app.js: setupAndroidAppSettings): выход по «Назад» — "off", "hold"
+    // (удержание) или "double" (двойное нажатие на главной, его ловит страница —
+    // config.js: rootBackPress). По наличию этих методов веб и показывает блок
+    @JavascriptInterface
+    fun getBackExitMode(): String = mainActivity.backExitMode
+
+    @JavascriptInterface
+    fun setBackExitMode(mode: String) {
+        mainActivity.backExitMode = when (mode) {
+            "hold", "double" -> mode
+            else -> "off"
+        }
+    }
+
+    // Выход из приложения по двойному «Назад» на главной — тот же, что у удержания и меню
+    @JavascriptInterface
+    fun appExit() {
+        mainActivity.runOnUiThread { mainActivity.appExit() }
     }
 
     @JavascriptInterface
